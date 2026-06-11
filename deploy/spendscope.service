@@ -1,0 +1,26 @@
+# systemd unit for the SpendScope backend (uvicorn).
+# Install: copy to /etc/systemd/system/spendscope.service, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now spendscope
+#
+# Adjust User, WorkingDirectory and the venv path to your VPS.
+
+[Unit]
+Description=SpendScope Backend (FastAPI/uvicorn)
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/spendscope
+EnvironmentFile=/var/www/spendscope/.env
+ExecStart=/var/www/spendscope/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8077 --workers 2
+Restart=always
+RestartSec=3
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
