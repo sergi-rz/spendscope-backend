@@ -29,8 +29,8 @@ class Settings(BaseSettings):
     # OpenAI-compatible Chat Completions endpoint.
     primary_base_url: str = "https://api.nan.builders/v1"
     primary_api_key: str = ""
-    primary_model_text: str = "qwen2.5-72b-instruct"
-    primary_model_vision: str = "mimo-v2.5"
+    primary_model_text: str = "gemma4"
+    primary_model_vision: str = "gemma4"
 
     # --- Fallback LLM provider (OpenAI) ---
     fallback_base_url: str = "https://api.openai.com/v1"

@@ -47,6 +47,21 @@ de la app.
   Si el gate está activo pero no se puede verificar (sin key / RevenueCat caído) → **503** (no se
   asume premium). Sin premium → **403** (la app ya maneja 403 mostrando el paywall).
 
+## Elección de modelo (benchmark 2026-06-13)
+
+- Probamos `qwen3.6`, `gemma4`, `deepseek-v4-flash` y el fallback `gpt-4o-mini` con los mismos
+  prompts del backend sobre un extracto BBVA real (`/parse`), 3 categorizaciones y un ticket de
+  Mercadona (`/enrich`, visión). **`gemma4` gana en las tres tareas** (parse 7s, categorize 3.5s,
+  enrich 7.3s, todo correcto) y es de cuota **ilimitada** → primario de texto y visión.
+- `qwen3.6` (primario inicial) descartado por **varianza alta en visión** (4.8s–48s) y picos en
+  texto que disparaban el timeout de 60s + fallback. `deepseek-v4-flash` rompía en `/parse`
+  (devuelve `content` nulo) y es lento + limitado. `mimo-v2.5` es el mejor en visión por
+  granularidad de categorías pero limitado (500M tok/mes); como `category_suggestion` es solo una
+  pista que la app recategoriza, no compensa gastar cuota.
+- `gpt-4o-mini` se mantiene como fallback (correcto en todo, pero ~26k tokens por ticket en visión
+  — caro, solo para emergencias).
+- A raíz de los picos de latencia, el `requestTimeout` de la app se subió de 30s a 60s.
+
 ## Cache de categorización
 
 - Clave: `signo + concepto normalizado` (minúsculas, espacios colapsados). Un hit solo se reutiliza
