@@ -1,0 +1,26 @@
+name: Deploy to VPS
+
+# Auto-deploy on push to main. Triggers the remote DCT deploy hook on the VPS,
+# which runs deploy/deploy.sh (git pull + pip install + systemctl restart).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trigger remote deploy hook
+        env:
+          HOOK_DEPLOY_URL:    ${{ secrets.HOOK_DEPLOY_URL }}
+          HOOK_DEPLOY_NAME:   ${{ secrets.HOOK_DEPLOY_NAME }}
+          HOOK_DEPLOY_SECRET: ${{ secrets.HOOK_DEPLOY_SECRET }}
+        run: |
+          chmod +x ./scripts/call_remote_hook_deploy.sh
+          bash ./scripts/call_remote_hook_deploy.sh \
+            --url "$HOOK_DEPLOY_URL" \
+            --hook "$HOOK_DEPLOY_NAME" \
+            --secret "$HOOK_DEPLOY_SECRET"
