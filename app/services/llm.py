@@ -45,21 +45,57 @@ class Provider:
         return bool(self.api_key and self.base_url)
 
 
+def _split_models(value: str) -> list[str]:
+    """A credential set may list several models (comma-separated), tried in order."""
+    return [m.strip() for m in value.split(",") if m.strip()]
+
+
+def _expand(
+    cred_name: str, base_url: str, api_key: str, model_text: str, model_vision: str
+) -> list[Provider]:
+    """Expand a credential set into one Provider per model tier.
+
+    `PRIMARY_MODEL_TEXT=gemma4,qwen3.6` becomes two tiers (gemma4 first, qwen3.6 next),
+    both sharing the same base_url/api_key. Text and vision model lists are paired by
+    index; a shorter list reuses its last entry so the counts need not match.
+    """
+    text_list = _split_models(model_text)
+    vision_list = _split_models(model_vision)
+    tiers = max(len(text_list), len(vision_list))
+    providers: list[Provider] = []
+    for i in range(tiers):
+        mt = text_list[i] if i < len(text_list) else (text_list[-1] if text_list else "")
+        mv = vision_list[i] if i < len(vision_list) else (vision_list[-1] if vision_list else "")
+        label = mt or mv or cred_name
+        providers.append(
+            Provider(
+                name=f"{cred_name}:{label}" if tiers > 1 else cred_name,
+                base_url=base_url,
+                api_key=api_key,
+                model_text=mt,
+                model_vision=mv,
+            )
+        )
+    return providers
+
+
 def _providers() -> list[Provider]:
+    """Ordered provider chain (SPECS §11.5). N tiers: each credential set may expose
+    several models, e.g. nan.builders `gemma4 → qwen3.6`, then OpenAI `gpt-4o-mini`."""
     return [
-        Provider(
-            name="nan_builders",
-            base_url=settings.primary_base_url,
-            api_key=settings.primary_api_key,
-            model_text=settings.primary_model_text,
-            model_vision=settings.primary_model_vision,
+        *_expand(
+            "nan_builders",
+            settings.primary_base_url,
+            settings.primary_api_key,
+            settings.primary_model_text,
+            settings.primary_model_vision,
         ),
-        Provider(
-            name="openai",
-            base_url=settings.fallback_base_url,
-            api_key=settings.fallback_api_key,
-            model_text=settings.fallback_model_text,
-            model_vision=settings.fallback_model_vision,
+        *_expand(
+            "openai",
+            settings.fallback_base_url,
+            settings.fallback_api_key,
+            settings.fallback_model_text,
+            settings.fallback_model_vision,
         ),
     ]
 

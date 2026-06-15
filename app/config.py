@@ -29,8 +29,10 @@ class Settings(BaseSettings):
     # OpenAI-compatible Chat Completions endpoint.
     primary_base_url: str = "https://api.nan.builders/v1"
     primary_api_key: str = ""
-    primary_model_text: str = "gemma4"
-    primary_model_vision: str = "gemma4"
+    # Comma-separated model chain within this provider, tried in order (SPECS §11.5).
+    # e.g. "gemma4,qwen3.6" → try gemma4 first, then qwen3.6, before the fallback provider.
+    primary_model_text: str = "gemma4,qwen3.6"
+    primary_model_vision: str = "gemma4,qwen3.6"
 
     # --- Fallback LLM provider (OpenAI) ---
     fallback_base_url: str = "https://api.openai.com/v1"

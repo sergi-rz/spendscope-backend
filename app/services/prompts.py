@@ -23,8 +23,7 @@ Return ONLY a JSON object with this exact shape:
       "transaction_type": "e.g. card payment, transfer, direct debit, Bizum, fee",
       "notes": ""
     }
-  ],
-  "bank_detected": "bank name if identifiable, else null"
+  ]
 }
 
 Rules:

@@ -50,3 +50,44 @@ async def test_unavailable_when_no_provider_configured(monkeypatch):
     monkeypatch.setattr(llm, "_providers", lambda: [])
     with pytest.raises(llm.LLMUnavailable):
         await llm.complete_json(system="s", user_text="u")
+
+
+def test_expand_single_model_keeps_plain_name():
+    providers = llm._expand("nan_builders", "https://x/v1", "k", "gemma4", "gemma4")
+    assert len(providers) == 1
+    assert providers[0].name == "nan_builders"
+    assert providers[0].model_text == "gemma4"
+
+
+def test_expand_model_chain_into_tiers():
+    providers = llm._expand("nan_builders", "https://x/v1", "k", "gemma4,qwen3.6", "gemma4,qwen3.6")
+    assert [p.name for p in providers] == ["nan_builders:gemma4", "nan_builders:qwen3.6"]
+    assert [p.model_text for p in providers] == ["gemma4", "qwen3.6"]
+    assert [p.model_vision for p in providers] == ["gemma4", "qwen3.6"]
+
+
+def test_expand_pads_shorter_list_with_last():
+    # Two text models, one vision model → vision reuses its single entry for both tiers.
+    providers = llm._expand("nan_builders", "https://x/v1", "k", "gemma4,qwen3.6", "gemma4")
+    assert [p.model_vision for p in providers] == ["gemma4", "gemma4"]
+
+
+async def test_three_tier_chain_walks_in_order(monkeypatch):
+    monkeypatch.setattr(
+        llm,
+        "_providers",
+        lambda: [_provider("nan:gemma4"), _provider("nan:qwen3.6"), _provider("openai")],
+    )
+    calls = []
+
+    async def fake_call(provider, system, user_text, image):
+        calls.append(provider.name)
+        if provider.name != "openai":
+            raise httpx.ConnectError("boom")
+        return {"ok": True}
+
+    monkeypatch.setattr(llm, "_call_provider", fake_call)
+
+    result = await llm.complete_json(system="s", user_text="u")
+    assert result.provider_used == "openai"
+    assert calls == ["nan:gemma4", "nan:qwen3.6", "openai"]
