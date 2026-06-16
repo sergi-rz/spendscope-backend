@@ -39,7 +39,7 @@ async def categorize(req: CategorizeRequest) -> CategorizeResponse:
 
         prompt = categorize_user_prompt(
             req.concept, req.amount, req.transaction_type, req.notes, req.categories,
-            req.rejected_suggestions,
+            req.rejected_suggestions, req.language,
         )
         try:
             result = await llm.complete_json(system=CATEGORIZE_SYSTEM, user_text=prompt)

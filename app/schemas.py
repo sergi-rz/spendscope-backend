@@ -54,6 +54,8 @@ class CategorizeRequest(BaseModel):
     categories: list[str] = Field(default_factory=list)
     # Names the user already declined as new-category proposals — never propose these again (#24).
     rejected_suggestions: list[str] = Field(default_factory=list)
+    # Device UI language ("en"/"es"); the model writes its proposal reason in this language (#28).
+    language: str = "en"
 
 
 class SuggestedCategory(BaseModel):

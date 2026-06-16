@@ -53,7 +53,8 @@ Rules:
 - "suggested_category": usually null. Only when NO allowed label fits well AND a clearly better,
   more specific category would — propose a NEW one as
   { "name": "Short Name", "parent": "<an existing top-level label it would sit under, or null>",
-  "reason": "<short reason>" }. Use the language of the allowed labels for "name".
+  "reason": "<short reason>" }. Write BOTH "name" and "reason" in the user's language given as
+  "language" in the user message ("es" = Spanish, "en" = English).
 - NEVER propose a name listed as already rejected by the user (see the user message).
 - Do not propose a new category that merely duplicates an existing allowed label.
 - Return the JSON object only — no markdown, no commentary."""
@@ -85,6 +86,7 @@ def categorize_user_prompt(
     notes: str | None,
     categories: list[str],
     rejected_suggestions: list[str] | None = None,
+    language: str = "en",
 ) -> str:
     payload = {
         "concept": concept,
@@ -93,6 +95,7 @@ def categorize_user_prompt(
         "notes": notes,
         "allowed_categories": categories,
         "rejected_new_categories": rejected_suggestions or [],
+        "language": language if language in ("en", "es") else "en",
     }
     return (
         "Categorize this transaction. Allowed categories are in the JSON. Do not propose any name "

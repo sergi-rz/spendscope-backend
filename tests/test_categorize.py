@@ -125,3 +125,38 @@ def test_categorize_no_suggestion_field_is_null(client, monkeypatch):
         json={"user_id": "u1", "concept": "BAR", "amount": -5.0, "categories": CATEGORIES},
     )
     assert resp.json()["suggested_category"] is None
+
+
+def test_categorize_forwards_language_to_prompt(client, monkeypatch):
+    captured = {}
+
+    async def _capture(*args, **kwargs):
+        captured["user_text"] = kwargs.get("user_text")
+        return llm.LLMResult(
+            data={"category": None, "confidence": 0.0}, provider_used="x", is_fallback=False, primary_error=None
+        )
+
+    monkeypatch.setattr(cat_router.llm, "complete_json", _capture)
+    resp = client.post(
+        "/api/v1/categorize",
+        json={"user_id": "u1", "concept": "X", "amount": -1.0, "categories": CATEGORIES, "language": "es"},
+    )
+    assert resp.status_code == 200
+    assert '"language": "es"' in captured["user_text"]
+
+
+def test_categorize_language_defaults_to_en(client, monkeypatch):
+    captured = {}
+
+    async def _capture(*args, **kwargs):
+        captured["user_text"] = kwargs.get("user_text")
+        return llm.LLMResult(
+            data={"category": None, "confidence": 0.0}, provider_used="x", is_fallback=False, primary_error=None
+        )
+
+    monkeypatch.setattr(cat_router.llm, "complete_json", _capture)
+    client.post(
+        "/api/v1/categorize",
+        json={"user_id": "u1", "concept": "X", "amount": -1.0, "categories": CATEGORIES},
+    )
+    assert '"language": "en"' in captured["user_text"]
