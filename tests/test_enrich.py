@@ -63,6 +63,63 @@ def test_enrich_computes_total_when_missing(client, monkeypatch):
     assert body["matches_transaction"] is True
 
 
+def test_enrich_returns_movements_for_order_history(client, monkeypatch):
+    data = {
+        "items": [
+            {"description": "Pañales", "amount": 20.0, "category_suggestion": "Niños / Pañales"},
+            {"description": "Libro", "amount": 15.0, "category_suggestion": "Ocio / Libros"},
+        ],
+        "total_parsed": 35.0,
+        "movements": [
+            {"date": "2026-05-02", "concept": "Amazon", "amount": 20.0,
+             "items": [{"description": "Pañales", "amount": 20.0, "category_suggestion": "Niños / Pañales"}]},
+            {"date": "2026-05-09", "concept": "Amazon", "amount": 15.0,
+             "items": [{"description": "Libro", "amount": 15.0, "category_suggestion": "Ocio / Libros"}]},
+        ],
+    }
+    monkeypatch.setattr(enrich_router.revenuecat, "is_premium", _premium(True))
+    monkeypatch.setattr(enrich_router.llm, "complete_json", _fake(data))
+    resp = client.post(
+        "/api/v1/enrich",
+        json={"user_id": "u1", "input_type": "text", "content": "order history", "transaction_amount": 0.0},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["movements"] is not None
+    assert len(body["movements"]) == 2
+    assert body["movements"][0]["date"] == "2026-05-02"
+    assert body["movements"][0]["amount"] == 20.0
+    assert len(body["movements"][0]["items"]) == 1
+
+
+def test_enrich_single_receipt_has_null_movements(client, monkeypatch):
+    monkeypatch.setattr(enrich_router.revenuecat, "is_premium", _premium(True))
+    monkeypatch.setattr(enrich_router.llm, "complete_json", _fake(ITEMS))
+    resp = client.post(
+        "/api/v1/enrich",
+        json={"user_id": "u1", "input_type": "text", "content": "t", "transaction_amount": -3.0},
+    )
+    assert resp.json()["movements"] is None
+
+
+def test_enrich_flattens_items_from_movements_only(client, monkeypatch):
+    data = {
+        "movements": [
+            {"date": None, "concept": "Amazon", "amount": 10.0,
+             "items": [{"description": "X", "amount": 10.0, "category_suggestion": None}]},
+        ],
+    }
+    monkeypatch.setattr(enrich_router.revenuecat, "is_premium", _premium(True))
+    monkeypatch.setattr(enrich_router.llm, "complete_json", _fake(data))
+    resp = client.post(
+        "/api/v1/enrich",
+        json={"user_id": "u1", "input_type": "text", "content": "order history", "transaction_amount": 0.0},
+    )
+    body = resp.json()
+    assert len(body["items"]) == 1
+    assert body["total_parsed"] == 10.0
+
+
 def test_enrich_not_premium_403(client, monkeypatch):
     monkeypatch.setattr(enrich_router.revenuecat, "is_premium", _premium(False))
     resp = client.post(

@@ -10,7 +10,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 
 from ..config import settings
-from ..schemas import EnrichedItem, EnrichRequest, EnrichResponse
+from ..schemas import EnrichedItem, EnrichMovement, EnrichRequest, EnrichResponse
 from ..services import llm, revenuecat
 from ..services.preprocess import PreprocessError, prepare
 from ..services.prompts import ENRICH_SYSTEM, enrich_user_prompt
@@ -67,12 +67,10 @@ async def enrich(req: EnrichRequest) -> EnrichResponse:
         return response
 
 
-def _to_response(data: dict, transaction_amount: float) -> EnrichResponse:
-    raw = data.get("items")
-    if not isinstance(raw, list):
-        raise HTTPException(status_code=502, detail="Enricher returned no items array")
-
+def _parse_items(raw) -> list[EnrichedItem]:
     items: list[EnrichedItem] = []
+    if not isinstance(raw, list):
+        return items
     for row in raw:
         if not isinstance(row, dict):
             continue
@@ -90,6 +88,43 @@ def _to_response(data: dict, transaction_amount: float) -> EnrichResponse:
                 category_suggestion=_as_str(row.get("category_suggestion")),
             )
         )
+    return items
+
+
+def _parse_movements(raw) -> list[EnrichMovement]:
+    """Parse the optional per-purchase grouping (#35). Movements with no items are dropped."""
+    movements: list[EnrichMovement] = []
+    if not isinstance(raw, list):
+        return movements
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        items = _parse_items(row.get("items"))
+        if not items:
+            continue
+        amount = _as_float(row.get("amount"))
+        if amount is None:
+            amount = round(sum(i.amount for i in items), 2)
+        movements.append(
+            EnrichMovement(
+                date=_as_str(row.get("date")),
+                concept=_as_str(row.get("concept")),
+                amount=round(abs(amount), 2),
+                items=items,
+            )
+        )
+    return movements
+
+
+def _to_response(data: dict, transaction_amount: float) -> EnrichResponse:
+    movements = _parse_movements(data.get("movements"))
+    items = _parse_items(data.get("items"))
+    # If the model only filled the per-purchase movements, flatten them into the flat item list too,
+    # so callers that just want the items (e.g. enriching an existing transaction) still work.
+    if not items and movements:
+        items = [item for movement in movements for item in movement.items]
+    if not items:
+        raise HTTPException(status_code=502, detail="Enricher returned no items array")
 
     total_parsed = _as_float(data.get("total_parsed"))
     if total_parsed is None:
@@ -99,7 +134,12 @@ def _to_response(data: dict, transaction_amount: float) -> EnrichResponse:
     tolerance = max(reference * settings.enrich_total_tolerance, 0.01)
     matches = reference > 0 and abs(total_parsed - reference) <= tolerance
 
-    return EnrichResponse(items=items, total_parsed=round(total_parsed, 2), matches_transaction=matches)
+    return EnrichResponse(
+        items=items,
+        total_parsed=round(total_parsed, 2),
+        matches_transaction=matches,
+        movements=movements or None,
+    )
 
 
 def _as_float(value) -> float | None:

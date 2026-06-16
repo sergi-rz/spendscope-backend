@@ -59,23 +59,33 @@ Rules:
 - Do not propose a new category that merely duplicates an existing allowed label.
 - Return the JSON object only — no markdown, no commentary."""
 
-ENRICH_SYSTEM = """You parse a purchase receipt or invoice into individual line items. You \
-receive the receipt as text or as an image. Extract each purchased product/line.
+ENRICH_SYSTEM = """You parse a purchase document into individual line items. You receive it as \
+text or as an image. It may be a single receipt/ticket OR a screenshot of an online order history \
+(e.g. Amazon) that contains SEVERAL independent purchases on different dates.
 
 Return ONLY a JSON object:
 {
   "items": [
     { "description": "product name as printed", "amount": 1.20, "category_suggestion": "Group / Subgroup" }
   ],
-  "total_parsed": 0.00
+  "total_parsed": 0.00,
+  "movements": null
 }
 
 Rules:
 - amount is the line total for that item (quantity x unit price), as a positive number.
 - category_suggestion is a short, human-readable hint like "Alimentación / Lácteos". It is a hint only.
-- total_parsed is the sum of the item amounts you extracted.
+- total_parsed is the sum of ALL the item amounts you extracted.
 - Ignore subtotals, taxes lines, totals, change, and payment-method lines — only real products.
 - Preserve the original language of the descriptions.
+- "movements": usually null. It is a SINGLE purchase (a receipt/ticket, or one order) → leave it null
+  and just fill "items". BUT if the document clearly shows SEVERAL INDEPENDENT purchases (an order
+  history with different dates and/or order numbers), return them as a list, one object per purchase:
+  { "date": "YYYY-MM-DD" or null, "concept": "merchant or order reference",
+    "amount": <that purchase's own total, positive>,
+    "items": [ { "description": ..., "amount": ..., "category_suggestion": ... }, ... ] }.
+  Put each purchase's own products under its own movement, and still fill the flat "items" with all of them.
+- Do NOT split a single multi-product purchase into several movements — only split genuinely separate orders.
 - Return the JSON object only — no markdown, no commentary."""
 
 

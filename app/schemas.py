@@ -88,10 +88,22 @@ class EnrichedItem(BaseModel):
     category_suggestion: str | None = None
 
 
+class EnrichMovement(BaseModel):
+    """One independent purchase found in the document (#35). An order-history screenshot has several
+    (different dates/orders); a single receipt has none (use the flat `items` instead)."""
+    date: str | None = None       # YYYY-MM-DD if visible
+    concept: str | None = None    # merchant or order reference
+    amount: float                 # this purchase's own total (positive)
+    items: list[EnrichedItem] = Field(default_factory=list)
+
+
 class EnrichResponse(BaseModel):
     items: list[EnrichedItem]
     total_parsed: float
     matches_transaction: bool
+    # Set when the document holds several independent purchases; the app then creates one
+    # transaction per movement instead of one big breakdown (#35). None/empty for a single receipt.
+    movements: list[EnrichMovement] | None = None
 
 
 # --- Errors --------------------------------------------------------------------
