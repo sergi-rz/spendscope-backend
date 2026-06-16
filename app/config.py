@@ -52,8 +52,9 @@ class Settings(BaseSettings):
     parse_chunk_line_threshold: int = 35
     # Data lines per batch; small so each batch's LLM call stays fast.
     parse_chunk_size: int = 30
-    # How many batches to send to the LLM concurrently (bounds total latency for big statements).
-    parse_chunk_concurrency: int = 6
+    # Batches sent to the LLM concurrently. 1 = sequential: the providers appear to serialize anyway,
+    # and parallel httpx calls proved unstable, so sequential is both safer and not slower.
+    parse_chunk_concurrency: int = 1
     # When true, log the model's raw output (truncated) on a parse failure, to debug LLMBadOutput.
     # Off by default: the raw output is user financial data and we don't want it in logs normally.
     llm_debug_raw: bool = False
