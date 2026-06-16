@@ -67,3 +67,15 @@ de la app.
 - Clave: `signo + concepto normalizado` (minúsculas, espacios colapsados). Un hit solo se reutiliza
   si el label cacheado sigue estando en la lista de categorías que envía la app, así categorías
   renombradas/eliminadas nunca resucitan un valor obsoleto. TTL configurable (30 días por defecto).
+
+## Troceo de /parse en backend (2026-06-16)
+
+Un extracto grande en Excel/PDF fallaba con `LLMBadOutput` + `finish_reason=length`: la salida JSON
+superaba `max_tokens` y se cortaba. La app no puede trocear binarios (Excel/PDF van como base64), así
+que el troceo vive en el backend: tras aplanar a texto, `/parse` parte el contenido en lotes de
+`parse_chunk_size` líneas (repitiendo la cabecera), llama al LLM por lote con concurrencia acotada
+(`parse_chunk_concurrency`) y fusiona los movimientos en orden. Un lote que falla se omite (el resto se
+importa). Las imágenes siguen siendo una sola llamada multimodal (no trocean). `max_tokens` subido a
+8192 (la salida es JSON acotado, no texto libre; con troceo cada lote va sobrado — el cap es solo un
+guard de coste/seguridad). Diagnóstico: `_call_provider` ahora añade `finish_reason` al error y
+`LLM_DEBUG_RAW` (off por defecto) puede loguear la salida cruda truncada.
