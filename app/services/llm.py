@@ -167,10 +167,25 @@ async def _call_provider(
 
     payload = resp.json()
     try:
-        content = payload["choices"][0]["message"]["content"]
+        choice = payload["choices"][0]
+        content = choice["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise LLMBadOutput(f"{provider.name} response missing content") from exc
-    return _extract_json(content)
+
+    finish_reason = choice.get("finish_reason") if isinstance(choice, dict) else None
+    try:
+        return _extract_json(content)
+    except LLMBadOutput as exc:
+        # finish_reason="length" means the JSON was cut off by max_tokens (statement too big for one
+        # call), not malformed — surfacing it makes LLMBadOutput in the logs/DB actionable.
+        if settings.llm_debug_raw:
+            logger.warning(
+                "%s bad output (finish_reason=%s):\n%s",
+                provider.name, finish_reason, (content or "")[: settings.llm_debug_raw_chars],
+            )
+        raise LLMBadOutput(
+            f"{exc} [finish_reason={finish_reason}, {len(content or '')} chars]"
+        ) from exc
 
 
 async def complete_json(
@@ -206,4 +221,7 @@ def _short_error(exc: Exception) -> str:
         return "timeout"
     if isinstance(exc, httpx.HTTPStatusError):
         return str(exc.response.status_code)
+    if isinstance(exc, LLMBadOutput):
+        # Keep the message (incl. finish_reason / char count) — that's what makes it debuggable.
+        return f"LLMBadOutput: {exc}"[:240]
     return type(exc).__name__

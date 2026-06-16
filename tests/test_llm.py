@@ -52,6 +52,25 @@ async def test_unavailable_when_no_provider_configured(monkeypatch):
         await llm.complete_json(system="s", user_text="u")
 
 
+async def test_bad_output_reports_finish_reason(monkeypatch):
+    # A truncated JSON body (finish_reason=length) — what a too-large statement produces.
+    payload = {"choices": [{"message": {"content": '{"transactions": [{"a": 1}'}, "finish_reason": "length"}]}
+
+    async def fake_post(self, url, json=None, headers=None):
+        return httpx.Response(200, json=payload, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    with pytest.raises(llm.LLMBadOutput) as excinfo:
+        await llm._call_provider(_provider("nan:gemma4"), system="s", user_text="u", image_data_uri=None)
+    assert "finish_reason=length" in str(excinfo.value)
+
+
+def test_short_error_keeps_bad_output_message():
+    msg = llm._short_error(llm.LLMBadOutput("could not parse JSON: x [finish_reason=length, 4096 chars]"))
+    assert msg.startswith("LLMBadOutput:")
+    assert "finish_reason=length" in msg
+
+
 def test_expand_single_model_keeps_plain_name():
     providers = llm._expand("nan_builders", "https://x/v1", "k", "gemma4", "gemma4")
     assert len(providers) == 1

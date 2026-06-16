@@ -42,6 +42,11 @@ class Settings(BaseSettings):
 
     llm_timeout_seconds: float = 60.0
     llm_max_output_tokens: int = 4096
+    # When true, log the model's raw output (truncated) on a parse failure, to debug LLMBadOutput.
+    # Off by default: the raw output is user financial data and we don't want it in logs normally.
+    llm_debug_raw: bool = False
+    # Max chars of raw output to log/keep when debugging (cap so logs don't explode).
+    llm_debug_raw_chars: int = 4000
 
     # --- Database (MySQL): cache + ops logging + rate limiting. No user data. ---
     # Empty string disables the DB entirely (cache/log/rate-limit degrade gracefully).
