@@ -52,11 +52,22 @@ class CategorizeRequest(BaseModel):
     transaction_type: str | None = None
     notes: str | None = None
     categories: list[str] = Field(default_factory=list)
+    # Names the user already declined as new-category proposals — never propose these again (#24).
+    rejected_suggestions: list[str] = Field(default_factory=list)
+
+
+class SuggestedCategory(BaseModel):
+    """A NEW category the model thinks fits better than any existing label (#24). The app shows it
+    as a "create this category?" prompt; it is never auto-applied."""
+    name: str
+    parent: str | None = None  # an existing top-level category it would live under, if any
+    reason: str | None = None
 
 
 class CategorizeResponse(BaseModel):
     category: str | None = None
     confidence: float | None = None
+    suggested_category: SuggestedCategory | None = None
 
 
 # --- POST /enrich --------------------------------------------------------------

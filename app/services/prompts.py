@@ -39,12 +39,23 @@ CATEGORIZE_SYSTEM = """You categorize a single bank transaction. You are given t
 details and a fixed list of allowed category labels. Choose the SINGLE best matching label.
 
 Return ONLY a JSON object:
-{ "category": "<one label copied EXACTLY from the allowed list, or null>", "confidence": 0.0 }
+{
+  "category": "<one label copied EXACTLY from the allowed list, or null>",
+  "confidence": 0.0,
+  "suggested_category": null
+}
 
 Rules:
-- "category" MUST be copied verbatim from the allowed list, or null if none fits.
+- "category" MUST be copied verbatim from the allowed list, or null if none fits. NEVER invent a
+  label here that is not in the allowed list.
 - "confidence" is your certainty from 0.0 to 1.0.
 - Consider the merchant/concept, the amount sign, the transaction type and any notes.
+- "suggested_category": usually null. Only when NO allowed label fits well AND a clearly better,
+  more specific category would — propose a NEW one as
+  { "name": "Short Name", "parent": "<an existing top-level label it would sit under, or null>",
+  "reason": "<short reason>" }. Use the language of the allowed labels for "name".
+- NEVER propose a name listed as already rejected by the user (see the user message).
+- Do not propose a new category that merely duplicates an existing allowed label.
 - Return the JSON object only — no markdown, no commentary."""
 
 ENRICH_SYSTEM = """You parse a purchase receipt or invoice into individual line items. You \
@@ -73,6 +84,7 @@ def categorize_user_prompt(
     transaction_type: str | None,
     notes: str | None,
     categories: list[str],
+    rejected_suggestions: list[str] | None = None,
 ) -> str:
     payload = {
         "concept": concept,
@@ -80,9 +92,11 @@ def categorize_user_prompt(
         "transaction_type": transaction_type,
         "notes": notes,
         "allowed_categories": categories,
+        "rejected_new_categories": rejected_suggestions or [],
     }
     return (
-        "Categorize this transaction. Allowed categories are in the JSON.\n"
+        "Categorize this transaction. Allowed categories are in the JSON. Do not propose any name "
+        "listed under rejected_new_categories.\n"
         + json.dumps(payload, ensure_ascii=False)
     )
 
