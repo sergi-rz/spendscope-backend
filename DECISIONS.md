@@ -79,3 +79,14 @@ importa). Las imágenes siguen siendo una sola llamada multimodal (no trocean). 
 8192 (la salida es JSON acotado, no texto libre; con troceo cada lote va sobrado — el cap es solo un
 guard de coste/seguridad). Diagnóstico: `_call_provider` ahora añade `finish_reason` al error y
 `LLM_DEBUG_RAW` (off por defecto) puede loguear la salida cruda truncada.
+
+## Pendiente: `/extract` + troceo orquestado por la app (2026-06-16)
+
+La mitigación actual (trocear `/parse` en secuencial, lotes de 30 líneas) resuelve extractos moderados
+pero no garantiza los muy grandes (todo el año): todo ocurre en una petición con tope de 120 s del
+reverse-proxy y la latencia del proveedor es irregular (90 tx≈23 s, 180 tx≈93 s). Decidido dejarlo
+PENDIENTE de hacer más sólido así: nuevo endpoint **`/extract`** (sin LLM): recibe el input,
+ejecuta `preprocess.prepare()` y devuelve `{kind: text|image, text}`. La app, para Excel/PDF, llama a
+`/extract`, trocea el texto con su `StatementChunker` y manda lotes pequeños a `/parse` con barra de
+progreso (como ya hace el texto pegado). Así cada `/parse` es una llamada pequeña y rápida, sin tope de
+tamaño. Detalle completo en el `PROGRESS.md` del repo de la app (Backlog).
