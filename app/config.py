@@ -41,7 +41,17 @@ class Settings(BaseSettings):
     fallback_model_vision: str = "gpt-4o-mini"
 
     llm_timeout_seconds: float = 60.0
-    llm_max_output_tokens: int = 4096
+    # Output is bounded structured JSON (never free text), so we can afford a generous cap. With
+    # /parse chunking each call stays well under this; it's mainly a runaway/cost guard now.
+    llm_max_output_tokens: int = 8192
+
+    # --- /parse chunking (so a large Excel/PDF statement isn't truncated, #LLMBadOutput) ---
+    # Flattened statements with more than this many non-empty lines are split into batches.
+    parse_chunk_line_threshold: int = 100
+    # Data lines per batch; each batch's JSON output stays comfortably under llm_max_output_tokens.
+    parse_chunk_size: int = 60
+    # How many batches to send to the LLM concurrently (bounds latency without hammering providers).
+    parse_chunk_concurrency: int = 4
     # When true, log the model's raw output (truncated) on a parse failure, to debug LLMBadOutput.
     # Off by default: the raw output is user financial data and we don't want it in logs normally.
     llm_debug_raw: bool = False
