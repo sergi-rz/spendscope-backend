@@ -52,9 +52,12 @@ Rules:
 - Consider the merchant/concept, the amount sign, the transaction type and any notes.
 - The AMOUNT SIGN is decisive: a NEGATIVE amount is money LEAVING the account (a payment/charge) —
   NEVER choose an income/earnings category for it. A POSITIVE amount is money entering the account.
-- Map well-known merchants to their real category even when the concept carries legal suffixes
-  (S.A., S.L., S.L.U., "espana"): sports/outdoor retailers (e.g. Decathlon, Trekkinn) → shopping;
-  parking operators (e.g. EasyPark, Saba, Telpark) → parking/transport; supermarkets → groceries.
+- Identify the merchant from the concept and infer WHAT KIND of business it is, then pick the
+  matching category. Do this for ANY merchant in ANY country — reason from the name, don't rely on
+  recognizing famous brands. Ignore legal/country tags (S.A., S.L., S.L.U., GmbH, Ltd, Inc, "espana").
+  Map by business type, e.g.: a sporting-goods/outdoor shop → shopping; a parking operator →
+  parking/transport; a grocery/supermarket → groceries; a pharmacy → health; an airline/hotel →
+  travel. If the name genuinely gives no clue about the business, return null instead of guessing.
 - A loan/mortgage repayment or "amortización de préstamo" is a LOAN/DEBT category, not a bank fee.
 - A transfer between the user's own accounts is a neutral internal transfer, not income or spending.
 - "suggested_category": usually null. Only when NO allowed label fits well AND a clearly better,
@@ -86,9 +89,12 @@ Rules:
 - Consider the merchant/concept, the amount sign, the transaction type and any notes.
 - The AMOUNT SIGN is decisive: a NEGATIVE amount is money LEAVING the account (a payment/charge) —
   NEVER choose an income/earnings category for it. A POSITIVE amount is money entering the account.
-- Map well-known merchants to their real category even when the concept carries legal suffixes
-  (S.A., S.L., S.L.U., "espana"): sports/outdoor retailers (e.g. Decathlon, Trekkinn) → shopping;
-  parking operators (e.g. EasyPark, Saba, Telpark) → parking/transport; supermarkets → groceries.
+- Identify the merchant from the concept and infer WHAT KIND of business it is, then pick the
+  matching category. Do this for ANY merchant in ANY country — reason from the name, don't rely on
+  recognizing famous brands. Ignore legal/country tags (S.A., S.L., S.L.U., GmbH, Ltd, Inc, "espana").
+  Map by business type, e.g.: a sporting-goods/outdoor shop → shopping; a parking operator →
+  parking/transport; a grocery/supermarket → groceries; a pharmacy → health; an airline/hotel →
+  travel. If the name genuinely gives no clue about the business, return null instead of guessing.
 - A loan/mortgage repayment or "amortización de préstamo" is a LOAN/DEBT category, not a bank fee.
 - A transfer between the user's own accounts is a neutral internal transfer, not income or spending.
 - "suggested_category": usually null. Only when NO allowed label fits well AND a clearly better,
