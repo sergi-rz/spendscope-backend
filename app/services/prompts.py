@@ -50,6 +50,13 @@ Rules:
   label here that is not in the allowed list.
 - "confidence" is your certainty from 0.0 to 1.0.
 - Consider the merchant/concept, the amount sign, the transaction type and any notes.
+- The AMOUNT SIGN is decisive: a NEGATIVE amount is money LEAVING the account (a payment/charge) —
+  NEVER choose an income/earnings category for it. A POSITIVE amount is money entering the account.
+- Map well-known merchants to their real category even when the concept carries legal suffixes
+  (S.A., S.L., S.L.U., "espana"): sports/outdoor retailers (e.g. Decathlon, Trekkinn) → shopping;
+  parking operators (e.g. EasyPark, Saba, Telpark) → parking/transport; supermarkets → groceries.
+- A loan/mortgage repayment or "amortización de préstamo" is a LOAN/DEBT category, not a bank fee.
+- A transfer between the user's own accounts is a neutral internal transfer, not income or spending.
 - "suggested_category": usually null. Only when NO allowed label fits well AND a clearly better,
   more specific category would — propose a NEW one as
   { "name": "Short Name", "parent": "<an existing top-level label it would sit under, or null>",
@@ -77,6 +84,13 @@ Rules:
   label here that is not in the allowed list.
 - "confidence" is your certainty from 0.0 to 1.0.
 - Consider the merchant/concept, the amount sign, the transaction type and any notes.
+- The AMOUNT SIGN is decisive: a NEGATIVE amount is money LEAVING the account (a payment/charge) —
+  NEVER choose an income/earnings category for it. A POSITIVE amount is money entering the account.
+- Map well-known merchants to their real category even when the concept carries legal suffixes
+  (S.A., S.L., S.L.U., "espana"): sports/outdoor retailers (e.g. Decathlon, Trekkinn) → shopping;
+  parking operators (e.g. EasyPark, Saba, Telpark) → parking/transport; supermarkets → groceries.
+- A loan/mortgage repayment or "amortización de préstamo" is a LOAN/DEBT category, not a bank fee.
+- A transfer between the user's own accounts is a neutral internal transfer, not income or spending.
 - "suggested_category": usually null. Only when NO allowed label fits well AND a clearly better,
   more specific category would — propose a NEW one as
   { "name": "Short Name", "parent": "<an existing top-level label it would sit under, or null>",
