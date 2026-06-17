@@ -10,9 +10,21 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from ..schemas import CategorizeRequest, CategorizeResponse, SuggestedCategory
+from ..schemas import (
+    CategorizeBatchRequest,
+    CategorizeBatchResponse,
+    CategorizeRequest,
+    CategorizeResponse,
+    CategorizeResult,
+    SuggestedCategory,
+)
 from ..services import cache, llm
-from ..services.prompts import CATEGORIZE_SYSTEM, categorize_user_prompt
+from ..services.prompts import (
+    CATEGORIZE_BATCH_SYSTEM,
+    CATEGORIZE_SYSTEM,
+    categorize_batch_user_prompt,
+    categorize_user_prompt,
+)
 from .common import enforce_rate_limit, timed
 
 logger = logging.getLogger("spendscope.categorize")
@@ -66,6 +78,87 @@ async def categorize(req: CategorizeRequest) -> CategorizeResponse:
         return CategorizeResponse(
             category=category, confidence=confidence, suggested_category=suggestion
         )
+
+
+@router.post("/categorize/batch", response_model=CategorizeBatchResponse)
+async def categorize_batch(req: CategorizeBatchRequest) -> CategorizeBatchResponse:
+    """Categorize many transactions in one shot (#44): per-item cache check first, then a SINGLE LLM
+    call for the cache misses. Degrades gracefully — if the provider is down, cached items still
+    resolve and the rest come back null so the app leaves them pending (never blocks the import)."""
+    enforce_rate_limit(req.user_id, "categorize_batch")
+
+    if not req.categories:
+        raise HTTPException(status_code=400, detail="categories must not be empty")
+    if not req.items:
+        return CategorizeBatchResponse(results=[])
+
+    allowed = {c.strip().lower(): c for c in req.categories}
+
+    with timed("categorize_batch") as metrics:
+        results: list[CategorizeResult | None] = [None] * len(req.items)
+        misses: list[int] = []
+
+        for i, item in enumerate(req.items):
+            cached = cache.get(item.concept, item.amount)
+            if cached and cached[0].strip().lower() in allowed:
+                results[i] = CategorizeResult(
+                    index=i, category=allowed[cached[0].strip().lower()], confidence=cached[1]
+                )
+            else:
+                misses.append(i)
+
+        if misses:
+            miss_items = [req.items[i] for i in misses]
+            prompt = categorize_batch_user_prompt(
+                miss_items, req.categories, req.rejected_suggestions, req.language
+            )
+            try:
+                result = await llm.complete_json(system=CATEGORIZE_BATCH_SYSTEM, user_text=prompt)
+                metrics.provider_used = result.provider_used
+                metrics.is_fallback = result.is_fallback
+                metrics.primary_error = result.primary_error
+                parsed = _parse_batch(result.data, allowed, req.categories, req.rejected_suggestions)
+                for local_idx, global_idx in enumerate(misses):
+                    category, confidence, suggestion = parsed.get(local_idx, (None, None, None))
+                    if category is not None:
+                        cache.put(
+                            req.items[global_idx].concept, req.items[global_idx].amount,
+                            category, confidence,
+                        )
+                    results[global_idx] = CategorizeResult(
+                        index=global_idx, category=category, confidence=confidence,
+                        suggested_category=suggestion,
+                    )
+            except llm.LLMUnavailable as exc:
+                # Graceful: cache hits already filled; leave misses null so the app retries later.
+                metrics.primary_error = metrics.primary_error or str(exc)
+
+        final = [
+            r if r is not None else CategorizeResult(index=i, category=None)
+            for i, r in enumerate(results)
+        ]
+        metrics.status = 200
+        return CategorizeBatchResponse(results=final)
+
+
+def _parse_batch(data, allowed: dict[str, str], categories: list[str], rejected: list[str]) -> dict:
+    """Map the model's `results` array to {local_index: (category, confidence, suggestion)}."""
+    out: dict[int, tuple] = {}
+    raw = data.get("results") if isinstance(data, dict) else None
+    if not isinstance(raw, list):
+        return out
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        idx = entry.get("index")
+        if not isinstance(idx, int) or isinstance(idx, bool):
+            continue
+        out[idx] = (
+            _resolve_label(entry.get("category"), allowed),
+            _as_confidence(entry.get("confidence")),
+            _parse_suggestion(entry.get("suggested_category"), categories, rejected),
+        )
+    return out
 
 
 def _resolve_label(value, allowed: dict[str, str]) -> str | None:

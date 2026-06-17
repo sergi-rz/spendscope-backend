@@ -59,6 +59,33 @@ Rules:
 - Do not propose a new category that merely duplicates an existing allowed label.
 - Return the JSON object only — no markdown, no commentary."""
 
+CATEGORIZE_BATCH_SYSTEM = """You categorize SEVERAL bank transactions at once. You are given a list \
+of transactions (each with an "index") and a fixed list of allowed category labels. For EACH \
+transaction choose the SINGLE best matching label.
+
+Return ONLY a JSON object:
+{
+  "results": [
+    { "index": 0, "category": "<one label copied EXACTLY from the allowed list, or null>",
+      "confidence": 0.0, "suggested_category": null }
+  ]
+}
+
+Rules:
+- Return exactly ONE result per input transaction, echoing its "index".
+- "category" MUST be copied verbatim from the allowed list, or null if none fits. NEVER invent a
+  label here that is not in the allowed list.
+- "confidence" is your certainty from 0.0 to 1.0.
+- Consider the merchant/concept, the amount sign, the transaction type and any notes.
+- "suggested_category": usually null. Only when NO allowed label fits well AND a clearly better,
+  more specific category would — propose a NEW one as
+  { "name": "Short Name", "parent": "<an existing top-level label it would sit under, or null>",
+  "reason": "<short reason>" }. Write BOTH "name" and "reason" in the user's language given as
+  "language" in the user message ("es" = Spanish, "en" = English).
+- NEVER propose a name listed as already rejected by the user (see the user message).
+- Do not propose a new category that merely duplicates an existing allowed label.
+- Return the JSON object only — no markdown, no commentary."""
+
 ENRICH_SYSTEM = """You parse a purchase document into individual line items. You receive it as \
 text or as an image. It may be a single receipt/ticket OR a screenshot of an online order history \
 (e.g. Amazon) that contains SEVERAL independent purchases on different dates.
@@ -110,6 +137,35 @@ def categorize_user_prompt(
     return (
         "Categorize this transaction. Allowed categories are in the JSON. Do not propose any name "
         "listed under rejected_new_categories.\n"
+        + json.dumps(payload, ensure_ascii=False)
+    )
+
+
+def categorize_batch_user_prompt(
+    items,
+    categories: list[str],
+    rejected_suggestions: list[str] | None = None,
+    language: str = "en",
+) -> str:
+    payload = {
+        "transactions": [
+            {
+                "index": i,
+                "concept": it.concept,
+                "amount": it.amount,
+                "transaction_type": it.transaction_type,
+                "notes": it.notes,
+            }
+            for i, it in enumerate(items)
+        ],
+        "allowed_categories": categories,
+        "rejected_new_categories": rejected_suggestions or [],
+        "language": language if language in ("en", "es") else "en",
+    }
+    return (
+        "Categorize EACH transaction below. Allowed categories are in the JSON. Return exactly one "
+        "result per transaction, echoing its index. Do not propose any name listed under "
+        "rejected_new_categories.\n"
         + json.dumps(payload, ensure_ascii=False)
     )
 

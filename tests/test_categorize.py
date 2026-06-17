@@ -160,3 +160,91 @@ def test_categorize_language_defaults_to_en(client, monkeypatch):
         json={"user_id": "u1", "concept": "X", "amount": -1.0, "categories": CATEGORIES},
     )
     assert '"language": "en"' in captured["user_text"]
+
+
+# --- POST /categorize/batch (#44) ---------------------------------------------
+
+
+def test_categorize_batch_maps_results_by_index(client, monkeypatch):
+    data = {"results": [
+        {"index": 0, "category": "Restaurantes / Cafés", "confidence": 0.9},
+        {"index": 1, "category": "Alimentación / Supermercado", "confidence": 0.8},
+    ]}
+    monkeypatch.setattr(cat_router.llm, "complete_json", _fake(data))
+    resp = client.post(
+        "/api/v1/categorize/batch",
+        json={
+            "user_id": "u1",
+            "items": [
+                {"concept": "BATCH BAR", "amount": -5.0},
+                {"concept": "BATCH MERCADONA", "amount": -30.0},
+            ],
+            "categories": CATEGORIES,
+        },
+    )
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert [r["index"] for r in results] == [0, 1]
+    assert results[0]["category"] == "Restaurantes / Cafés"
+    assert results[1]["category"] == "Alimentación / Supermercado"
+
+
+def test_categorize_batch_one_call_for_many_items(client, monkeypatch):
+    calls = {"n": 0}
+
+    async def _count(*args, **kwargs):
+        calls["n"] += 1
+        return llm.LLMResult(
+            data={"results": [{"index": i, "category": None} for i in range(5)]},
+            provider_used="x", is_fallback=False, primary_error=None,
+        )
+
+    monkeypatch.setattr(cat_router.llm, "complete_json", _count)
+    items = [{"concept": f"BATCHN {i}", "amount": -float(i + 1)} for i in range(5)]
+    resp = client.post(
+        "/api/v1/categorize/batch", json={"user_id": "u1", "items": items, "categories": CATEGORIES}
+    )
+    assert resp.status_code == 200
+    assert len(resp.json()["results"]) == 5
+    assert calls["n"] == 1, "the whole batch must be a single LLM call"
+
+
+def test_categorize_batch_unknown_label_is_null(client, monkeypatch):
+    monkeypatch.setattr(
+        cat_router.llm, "complete_json", _fake({"results": [{"index": 0, "category": "Nope"}]})
+    )
+    resp = client.post(
+        "/api/v1/categorize/batch",
+        json={"user_id": "u1", "items": [{"concept": "BATCH X", "amount": -1.0}], "categories": CATEGORIES},
+    )
+    assert resp.json()["results"][0]["category"] is None
+
+
+def test_categorize_batch_empty_items_returns_empty(client):
+    resp = client.post(
+        "/api/v1/categorize/batch",
+        json={"user_id": "u1", "items": [], "categories": CATEGORIES},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["results"] == []
+
+
+def test_categorize_batch_empty_categories_400(client):
+    resp = client.post(
+        "/api/v1/categorize/batch",
+        json={"user_id": "u1", "items": [{"concept": "X", "amount": -1.0}], "categories": []},
+    )
+    assert resp.status_code == 400
+
+
+def test_categorize_batch_graceful_when_llm_down(client, monkeypatch):
+    async def _boom(*args, **kwargs):
+        raise llm.LLMUnavailable("down")
+
+    monkeypatch.setattr(cat_router.llm, "complete_json", _boom)
+    resp = client.post(
+        "/api/v1/categorize/batch",
+        json={"user_id": "u1", "items": [{"concept": "BATCH DOWN", "amount": -1.0}], "categories": CATEGORIES},
+    )
+    assert resp.status_code == 200  # partial success, never blocks the import
+    assert resp.json()["results"][0]["category"] is None

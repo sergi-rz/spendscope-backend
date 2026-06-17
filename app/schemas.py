@@ -92,6 +92,37 @@ class CategorizeResponse(BaseModel):
     suggested_category: SuggestedCategory | None = None
 
 
+# --- POST /categorize/batch ----------------------------------------------------
+
+
+class CategorizeItem(BaseModel):
+    concept: str
+    amount: float
+    transaction_type: str | None = None
+    notes: str | None = None
+
+
+class CategorizeBatchRequest(BaseModel):
+    """Categorize several transactions in ONE request, so a large import doesn't fan out into one
+    LLM call (and one rate-limit hit) per transaction (#44). The category list is shared."""
+    user_id: str
+    items: list[CategorizeItem] = Field(default_factory=list)
+    categories: list[str] = Field(default_factory=list)
+    rejected_suggestions: list[str] = Field(default_factory=list)
+    language: str = "en"
+
+
+class CategorizeResult(BaseModel):
+    index: int  # echoes the input position so the app can map results back
+    category: str | None = None
+    confidence: float | None = None
+    suggested_category: SuggestedCategory | None = None
+
+
+class CategorizeBatchResponse(BaseModel):
+    results: list[CategorizeResult] = Field(default_factory=list)
+
+
 # --- POST /enrich --------------------------------------------------------------
 
 
