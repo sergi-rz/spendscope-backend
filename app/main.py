@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__, db
 from .config import settings
-from .routers import categorize, enrich, health, parse
+from .routers import categorize, enrich, extract, health, parse
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,6 +46,7 @@ app.add_middleware(
 
 # Contract endpoints (SPECS §11).
 app.include_router(parse.router, prefix=settings.api_prefix, tags=["parse"])
+app.include_router(extract.router, prefix=settings.api_prefix, tags=["extract"])
 app.include_router(categorize.router, prefix=settings.api_prefix, tags=["categorize"])
 app.include_router(enrich.router, prefix=settings.api_prefix, tags=["enrich"])
 

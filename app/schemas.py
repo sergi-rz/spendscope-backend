@@ -4,6 +4,7 @@ sends and decodes (it uses convert-to/from-snake-case key strategies)."""
 from __future__ import annotations
 
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -40,6 +41,25 @@ class ParseMetadata(BaseModel):
 class ParseResponse(BaseModel):
     transactions: list[ParsedTransaction]
     metadata: ParseMetadata
+
+
+# --- POST /extract -------------------------------------------------------------
+
+
+class ExtractRequest(BaseModel):
+    """Same payload as /parse, but /extract only flattens the document — it never calls the LLM."""
+    user_id: str
+    input_type: InputType
+    content: str  # raw text, or base64 of a binary document/image
+    filename: str | None = None
+
+
+class ExtractResponse(BaseModel):
+    """Result of flattening a binary statement (Excel/PDF) to text WITHOUT the LLM (#42). The app
+    chunks `text` into small /parse calls with a progress bar. A real photo/scan can't be flattened,
+    so `kind="image"` tells the app to send it straight to /parse as a single multimodal call."""
+    kind: Literal["text", "image"]
+    text: str | None = None
 
 
 # --- POST /categorize ----------------------------------------------------------

@@ -80,13 +80,22 @@ importa). Las imágenes siguen siendo una sola llamada multimodal (no trocean). 
 guard de coste/seguridad). Diagnóstico: `_call_provider` ahora añade `finish_reason` al error y
 `LLM_DEBUG_RAW` (off por defecto) puede loguear la salida cruda truncada.
 
-## Pendiente: `/extract` + troceo orquestado por la app (2026-06-16)
+## `/extract` + troceo orquestado por la app — HECHO (2026-06-17, FEEDBACK #42)
 
-La mitigación actual (trocear `/parse` en secuencial, lotes de 30 líneas) resuelve extractos moderados
-pero no garantiza los muy grandes (todo el año): todo ocurre en una petición con tope de 120 s del
-reverse-proxy y la latencia del proveedor es irregular (90 tx≈23 s, 180 tx≈93 s). Decidido dejarlo
-PENDIENTE de hacer más sólido así: nuevo endpoint **`/extract`** (sin LLM): recibe el input,
-ejecuta `preprocess.prepare()` y devuelve `{kind: text|image, text}`. La app, para Excel/PDF, llama a
-`/extract`, trocea el texto con su `StatementChunker` y manda lotes pequeños a `/parse` con barra de
-progreso (como ya hace el texto pegado). Así cada `/parse` es una llamada pequeña y rápida, sin tope de
-tamaño. Detalle completo en el `PROGRESS.md` del repo de la app (Backlog).
+Arquitectura elegida por el propietario: **la app orquesta, backend sin estado** (frente a guardar el
+fichero en el servidor + async/notificaciones, que rompía la garantía de cero-almacenamiento).
+
+Implementado el endpoint **`/extract`** (`app/routers/extract.py`, sin LLM, sin almacenar nada): recibe
+el mismo input que `/parse` (texto / base64 binario + filename), ejecuta `preprocess.prepare()`
+(PDF→texto con PyMuPDF, Excel→texto con openpyxl) y devuelve `{kind: "text"|"image", text}`. Una foto
+real vuelve como `kind:"image"` (no se puede aplanar) y la app la manda entera a `/parse`.
+
+La app, para un extracto binario (Excel/PDF), llama primero a `/extract`, trocea el texto con su
+`StatementChunker` y manda lotes pequeños a `/parse` con **barra de progreso real** y **reintento por
+lote** ante latencias irregulares. Así cada `/parse` es una llamada pequeña y rápida, sin tope de
+tamaño de extracto, y el backend no guarda nada (la app/SwiftData es el almacén duradero; "reprocesar"
+= reenviar el lote). El troceo en backend de `/parse` queda como red de seguridad si `/extract` falla.
+
+`schemas.py`: `ExtractRequest`/`ExtractResponse`. `main.py`: router montado. Tests `tests/test_extract.py`
+(5). La mitigación previa (trocear `/parse` en secuencial, lotes de 30 líneas, `max_tokens=8192`) se
+mantiene como red de seguridad.
