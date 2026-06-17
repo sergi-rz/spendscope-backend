@@ -248,3 +248,43 @@ def test_categorize_batch_graceful_when_llm_down(client, monkeypatch):
     )
     assert resp.status_code == 200  # partial success, never blocks the import
     assert resp.json()["results"][0]["category"] is None
+
+
+def test_categorize_returns_suggested_pattern(client, monkeypatch):
+    monkeypatch.setattr(
+        cat_router.llm,
+        "complete_json",
+        _fake({"category": CATEGORIES[0], "confidence": 0.9, "suggested_pattern": "Amazon"}),
+    )
+    resp = client.post(
+        "/api/v1/categorize",
+        json={"user_id": "u1", "concept": "www.amazon.esv1332423", "amount": -19.9, "categories": CATEGORIES},
+    )
+    assert resp.json()["suggested_pattern"] == "amazon"  # lowercased, reusable token
+
+
+def test_categorize_drops_hallucinated_pattern(client, monkeypatch):
+    # The model returns a token that is NOT in the concept — we must not trust it (#50).
+    monkeypatch.setattr(
+        cat_router.llm,
+        "complete_json",
+        _fake({"category": CATEGORIES[0], "confidence": 0.9, "suggested_pattern": "amazon"}),
+    )
+    resp = client.post(
+        "/api/v1/categorize",
+        json={"user_id": "u1", "concept": "MERCADONA 1234", "amount": -19.9, "categories": CATEGORIES},
+    )
+    assert resp.json()["suggested_pattern"] is None
+
+
+def test_categorize_batch_returns_suggested_pattern(client, monkeypatch):
+    data = {"results": [
+        {"index": 0, "category": CATEGORIES[0], "confidence": 0.8, "suggested_pattern": "MERCADONA"},
+    ]}
+    monkeypatch.setattr(cat_router.llm, "complete_json", _fake(data))
+    resp = client.post(
+        "/api/v1/categorize/batch",
+        json={"user_id": "u1", "items": [{"concept": "COMPRA TARJ 4587 MERCADONA 1234", "amount": -30.0}],
+              "categories": CATEGORIES},
+    )
+    assert resp.json()["results"][0]["suggested_pattern"] == "mercadona"

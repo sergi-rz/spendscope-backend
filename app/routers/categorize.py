@@ -70,13 +70,15 @@ async def categorize(req: CategorizeRequest) -> CategorizeResponse:
         suggestion = _parse_suggestion(
             result.data.get("suggested_category"), req.categories, req.rejected_suggestions
         )
+        pattern = _parse_pattern(result.data.get("suggested_pattern"), req.concept)
 
         if category is not None:
             cache.put(req.concept, req.amount, category, confidence)
 
         metrics.status = 200
         return CategorizeResponse(
-            category=category, confidence=confidence, suggested_category=suggestion
+            category=category, confidence=confidence, suggested_category=suggestion,
+            suggested_pattern=pattern,
         )
 
 
@@ -119,7 +121,9 @@ async def categorize_batch(req: CategorizeBatchRequest) -> CategorizeBatchRespon
                 metrics.primary_error = result.primary_error
                 parsed = _parse_batch(result.data, allowed, req.categories, req.rejected_suggestions)
                 for local_idx, global_idx in enumerate(misses):
-                    category, confidence, suggestion = parsed.get(local_idx, (None, None, None))
+                    category, confidence, suggestion, pattern = parsed.get(
+                        local_idx, (None, None, None, None)
+                    )
                     if category is not None:
                         cache.put(
                             req.items[global_idx].concept, req.items[global_idx].amount,
@@ -127,7 +131,7 @@ async def categorize_batch(req: CategorizeBatchRequest) -> CategorizeBatchRespon
                         )
                     results[global_idx] = CategorizeResult(
                         index=global_idx, category=category, confidence=confidence,
-                        suggested_category=suggestion,
+                        suggested_category=suggestion, suggested_pattern=pattern,
                     )
             except llm.LLMUnavailable as exc:
                 # Graceful: cache hits already filled; leave misses null so the app retries later.
@@ -142,7 +146,7 @@ async def categorize_batch(req: CategorizeBatchRequest) -> CategorizeBatchRespon
 
 
 def _parse_batch(data, allowed: dict[str, str], categories: list[str], rejected: list[str]) -> dict:
-    """Map the model's `results` array to {local_index: (category, confidence, suggestion)}."""
+    """Map the model's `results` array to {local_index: (category, confidence, suggestion, pattern)}."""
     out: dict[int, tuple] = {}
     raw = data.get("results") if isinstance(data, dict) else None
     if not isinstance(raw, list):
@@ -157,6 +161,7 @@ def _parse_batch(data, allowed: dict[str, str], categories: list[str], rejected:
             _resolve_label(entry.get("category"), allowed),
             _as_confidence(entry.get("confidence")),
             _parse_suggestion(entry.get("suggested_category"), categories, rejected),
+            _parse_pattern(entry.get("suggested_pattern"), None),
         )
     return out
 
@@ -198,6 +203,19 @@ def _parse_suggestion(
         parent=parent.strip() if isinstance(parent, str) and parent.strip() else None,
         reason=reason.strip() if isinstance(reason, str) and reason.strip() else None,
     )
+
+
+def _parse_pattern(value, concept: str | None) -> str | None:
+    """Validate the model's reusable rule pattern (#50): a short lowercase token. When we know the
+    original concept, require the pattern to actually occur in it — drop hallucinated tokens."""
+    if not isinstance(value, str):
+        return None
+    pattern = value.strip().lower()
+    if len(pattern) < 2 or len(pattern) > 60:
+        return None
+    if concept is not None and pattern not in concept.lower():
+        return None
+    return pattern
 
 
 def _as_confidence(value) -> float | None:

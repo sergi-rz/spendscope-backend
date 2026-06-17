@@ -42,7 +42,8 @@ Return ONLY a JSON object:
 {
   "category": "<one label copied EXACTLY from the allowed list, or null>",
   "confidence": 0.0,
-  "suggested_category": null
+  "suggested_category": null,
+  "suggested_pattern": null
 }
 
 Rules:
@@ -67,6 +68,12 @@ Rules:
   "language" in the user message ("es" = Spanish, "en" = English).
 - NEVER propose a name listed as already rejected by the user (see the user message).
 - Do not propose a new category that merely duplicates an existing allowed label.
+- "suggested_pattern": a SHORT, stable, lowercase substring of the concept that names the
+  merchant/provider and would ALSO appear in future transactions from the same source, so the app can
+  learn a reusable rule. Strip reference numbers, dates, card masks, store numbers and URL noise:
+  "www.amazon.esv1332423" -> "amazon", "COMPRA TARJ. 4587 MERCADONA 1234" -> "mercadona",
+  "EASYPARK ESPANA S.L.U 0098" -> "easypark". Keep it specific enough not to over-match (prefer the
+  brand over a generic word). Use null if no stable token stands out.
 - Return the JSON object only — no markdown, no commentary."""
 
 CATEGORIZE_BATCH_SYSTEM = """You categorize SEVERAL bank transactions at once. You are given a list \
@@ -77,7 +84,7 @@ Return ONLY a JSON object:
 {
   "results": [
     { "index": 0, "category": "<one label copied EXACTLY from the allowed list, or null>",
-      "confidence": 0.0, "suggested_category": null }
+      "confidence": 0.0, "suggested_category": null, "suggested_pattern": null }
   ]
 }
 
@@ -104,6 +111,12 @@ Rules:
   "language" in the user message ("es" = Spanish, "en" = English).
 - NEVER propose a name listed as already rejected by the user (see the user message).
 - Do not propose a new category that merely duplicates an existing allowed label.
+- "suggested_pattern": a SHORT, stable, lowercase substring of the concept that names the
+  merchant/provider and would ALSO appear in future transactions from the same source, so the app can
+  learn a reusable rule. Strip reference numbers, dates, card masks, store numbers and URL noise:
+  "www.amazon.esv1332423" -> "amazon", "COMPRA TARJ. 4587 MERCADONA 1234" -> "mercadona",
+  "EASYPARK ESPANA S.L.U 0098" -> "easypark". Keep it specific enough not to over-match (prefer the
+  brand over a generic word). Use null if no stable token stands out.
 - Return the JSON object only — no markdown, no commentary."""
 
 ENRICH_SYSTEM = """You parse a purchase document into individual line items. You receive it as \

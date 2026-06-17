@@ -90,6 +90,9 @@ class CategorizeResponse(BaseModel):
     category: str | None = None
     confidence: float | None = None
     suggested_category: SuggestedCategory | None = None
+    # A short, stable substring that identifies the merchant/provider so the app can learn a REUSABLE
+    # rule instead of the full noisy concept (#50). E.g. "amazon.es" from "www.amazon.esv1332423".
+    suggested_pattern: str | None = None
 
 
 # --- POST /categorize/batch ----------------------------------------------------
@@ -117,6 +120,7 @@ class CategorizeResult(BaseModel):
     category: str | None = None
     confidence: float | None = None
     suggested_category: SuggestedCategory | None = None
+    suggested_pattern: str | None = None  # reusable merchant token for rule learning (#50)
 
 
 class CategorizeBatchResponse(BaseModel):
