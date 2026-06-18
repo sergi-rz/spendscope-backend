@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import httpx
@@ -189,23 +190,29 @@ async def _call_provider(
 
 
 async def complete_json(
-    *, system: str, user_text: str, image_data_uri: str | None = None
+    *,
+    system: str,
+    user_text: str,
+    image_data_uri: str | None = None,
+    accept: Callable[[dict], bool] | None = None,
 ) -> LLMResult:
-    """Run the prompt through the provider chain and return parsed JSON + provider metadata."""
+    """Run the prompt through the provider chain and return parsed JSON + provider metadata.
+
+    `accept` is an optional quality gate (#52). When given, a provider's parsed JSON is only
+    returned if `accept(data)` is True; otherwise it is a *soft* rejection — the parse was valid
+    but not good enough (e.g. an OCR pass whose item sum is far from the printed total) — so we
+    escalate to the next, stronger provider. If no provider satisfies the gate, the strongest
+    model's parse is returned as a best effort rather than failing.
+    """
     providers = [p for p in _providers() if p.configured]
     if not providers:
         raise LLMUnavailable("no LLM provider configured (set PRIMARY_API_KEY / FALLBACK_API_KEY)")
 
     primary_error: str | None = None
+    soft_rejected: LLMResult | None = None
     for index, provider in enumerate(providers):
         try:
             data = await _call_provider(provider, system, user_text, image_data_uri)
-            return LLMResult(
-                data=data,
-                provider_used=provider.name,
-                is_fallback=index > 0,
-                primary_error=primary_error,
-            )
         except (httpx.HTTPError, LLMBadOutput) as exc:
             message = str(exc)
             logger.warning("provider %s failed: %s", provider.name, message)
@@ -213,6 +220,21 @@ async def complete_json(
                 primary_error = _short_error(exc)
             continue
 
+        result = LLMResult(
+            data=data,
+            provider_used=provider.name,
+            is_fallback=index > 0,
+            primary_error=primary_error,
+        )
+        if accept is None or accept(data):
+            return result
+        # Valid JSON but it failed the caller's quality gate: keep the strongest such parse as a
+        # fallback and escalate to the next provider.
+        logger.info("provider %s parse rejected by quality gate; escalating", provider.name)
+        soft_rejected = result
+
+    if soft_rejected is not None:
+        return soft_rejected
     raise LLMUnavailable(primary_error or "all providers failed")
 
 

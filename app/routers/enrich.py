@@ -51,7 +51,10 @@ async def enrich(req: EnrichRequest) -> EnrichResponse:
 
         try:
             result = await llm.complete_json(
-                system=ENRICH_SYSTEM, user_text=user_text, image_data_uri=image_uri
+                system=ENRICH_SYSTEM,
+                user_text=user_text,
+                image_data_uri=image_uri,
+                accept=_completeness_ok,
             )
         except llm.LLMUnavailable as exc:
             metrics.status = 502
@@ -116,13 +119,39 @@ def _parse_movements(raw) -> list[EnrichMovement]:
     return movements
 
 
+def _flatten_items(data: dict) -> list[EnrichedItem]:
+    """The item list, drawing from `items` or, failing that, the per-movement items (#35)."""
+    items = _parse_items(data.get("items"))
+    if not items:
+        movements = _parse_movements(data.get("movements"))
+        items = [item for movement in movements for item in movement.items]
+    return items
+
+
+def _completeness_ok(data: dict) -> bool:
+    """Quality gate for provider escalation (#52): accept a parse only if the items we extracted
+    add up to the receipt's printed subtotal (or total) within tolerance. A parse that misses many
+    line items — its sum falling well short of the printed figure — is soft-rejected so a stronger
+    model gets a turn. With nothing printed to check against, we can't judge, so we accept."""
+    if not isinstance(data, dict):
+        return True  # let _to_response raise the precise error
+    items = _flatten_items(data)
+    if not items:
+        return False  # no items at all → a stronger model may do better
+    # Items sum to the pre-discount subtotal; fall back to the total only if no subtotal is printed.
+    target = _as_float(data.get("subtotal")) or _as_float(data.get("ticket_total"))
+    if not target or target <= 0:
+        return True  # nothing authoritative to validate against
+    item_sum = sum(i.amount for i in items)
+    tolerance = max(abs(target) * settings.enrich_total_tolerance, 0.01)
+    return abs(item_sum - abs(target)) <= tolerance
+
+
 def _to_response(data: dict, transaction_amount: float) -> EnrichResponse:
     movements = _parse_movements(data.get("movements"))
-    items = _parse_items(data.get("items"))
     # If the model only filled the per-purchase movements, flatten them into the flat item list too,
     # so callers that just want the items (e.g. enriching an existing transaction) still work.
-    if not items and movements:
-        items = [item for movement in movements for item in movement.items]
+    items = _flatten_items(data)
     if not items:
         raise HTTPException(status_code=502, detail="Enricher returned no items array")
 
@@ -130,14 +159,26 @@ def _to_response(data: dict, transaction_amount: float) -> EnrichResponse:
     if total_parsed is None:
         total_parsed = round(sum(i.amount for i in items), 2)
 
+    ticket_total = _as_float(data.get("ticket_total"))
+    subtotal = _as_float(data.get("subtotal"))
+    ticket_date = _as_str(data.get("ticket_date"))
+    ticket_total = round(abs(ticket_total), 2) if ticket_total is not None else None
+    subtotal = round(abs(subtotal), 2) if subtotal is not None else None
+
+    # When the document prints its own total, that's the authoritative figure to match against the
+    # known statement amount; fall back to the summed items otherwise.
     reference = abs(transaction_amount)
+    effective_total = ticket_total if ticket_total is not None else total_parsed
     tolerance = max(reference * settings.enrich_total_tolerance, 0.01)
-    matches = reference > 0 and abs(total_parsed - reference) <= tolerance
+    matches = reference > 0 and abs(effective_total - reference) <= tolerance
 
     return EnrichResponse(
         items=items,
         total_parsed=round(total_parsed, 2),
         matches_transaction=matches,
+        ticket_total=ticket_total,
+        subtotal=subtotal,
+        ticket_date=ticket_date,
         movements=movements or None,
     )
 

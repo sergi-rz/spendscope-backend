@@ -156,6 +156,13 @@ class EnrichResponse(BaseModel):
     items: list[EnrichedItem]
     total_parsed: float
     matches_transaction: bool
+    # The receipt's own printed values (#51, subtotal also feeds the #52 OCR gate). The app anchors
+    # the transaction amount/date to these
+    # authoritative figures instead of summing OCR items (which may be incomplete), and shows them
+    # for the user to confirm. None when not visible on the document.
+    ticket_total: float | None = None   # the amount actually paid ("TOTAL A PAGAR" / "IMPORTE")
+    subtotal: float | None = None       # sum before coupons/discounts ("SUBTOTAL"), if printed
+    ticket_date: str | None = None      # purchase date, YYYY-MM-DD
     # Set when the document holds several independent purchases; the app then creates one
     # transaction per movement instead of one big breakdown (#35). None/empty for a single receipt.
     movements: list[EnrichMovement] | None = None

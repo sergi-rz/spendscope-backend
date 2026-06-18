@@ -120,6 +120,69 @@ def test_enrich_flattens_items_from_movements_only(client, monkeypatch):
     assert body["total_parsed"] == 10.0
 
 
+def test_enrich_returns_ticket_total_and_date(client, monkeypatch):
+    # #51: the receipt's printed total/subtotal/date come through so the app can anchor + confirm.
+    data = {
+        "items": [{"description": "A", "amount": 1.20}, {"description": "B", "amount": 1.80}],
+        "total_parsed": 3.00,
+        "ticket_total": 211.58,
+        "subtotal": 219.64,
+        "ticket_date": "2026-04-29",
+    }
+    monkeypatch.setattr(enrich_router.revenuecat, "is_premium", _premium(True))
+    monkeypatch.setattr(enrich_router.llm, "complete_json", _fake(data))
+    resp = client.post(
+        "/api/v1/enrich",
+        json={"user_id": "u1", "input_type": "text", "content": "t", "transaction_amount": 0.0},
+    )
+    body = resp.json()
+    assert body["ticket_total"] == 211.58
+    assert body["subtotal"] == 219.64
+    assert body["ticket_date"] == "2026-04-29"
+
+
+def test_enrich_matches_uses_printed_total_over_item_sum(client, monkeypatch):
+    # Items sum to 3.00 but the receipt was paid 211.58; matching the known statement amount must
+    # use the printed ticket_total, not the (incomplete) item sum.
+    data = {
+        "items": [{"description": "A", "amount": 1.20}, {"description": "B", "amount": 1.80}],
+        "total_parsed": 3.00,
+        "ticket_total": 211.58,
+    }
+    monkeypatch.setattr(enrich_router.revenuecat, "is_premium", _premium(True))
+    monkeypatch.setattr(enrich_router.llm, "complete_json", _fake(data))
+    resp = client.post(
+        "/api/v1/enrich",
+        json={"user_id": "u1", "input_type": "text", "content": "t", "transaction_amount": -211.58},
+    )
+    assert resp.json()["matches_transaction"] is True
+
+
+def test_completeness_gate_rejects_short_item_sum():
+    # Sum 141.76 vs printed subtotal 219.64 → far off → escalate.
+    assert enrich_router._completeness_ok(
+        {"items": [{"description": "x", "amount": 141.76}], "subtotal": 219.64}
+    ) is False
+
+
+def test_completeness_gate_accepts_matching_sum():
+    assert enrich_router._completeness_ok(
+        {"items": [{"description": "x", "amount": 100.0}, {"description": "y", "amount": 119.64}],
+         "subtotal": 219.64}
+    ) is True
+
+
+def test_completeness_gate_accepts_when_nothing_to_check():
+    # No printed subtotal/total → we can't judge completeness → accept (don't escalate blindly).
+    assert enrich_router._completeness_ok(
+        {"items": [{"description": "x", "amount": 5.0}]}
+    ) is True
+
+
+def test_completeness_gate_rejects_empty_items():
+    assert enrich_router._completeness_ok({"items": [], "subtotal": 50.0}) is False
+
+
 def test_enrich_not_premium_403(client, monkeypatch):
     monkeypatch.setattr(enrich_router.revenuecat, "is_premium", _premium(False))
     resp = client.post(

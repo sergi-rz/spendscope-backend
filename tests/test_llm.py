@@ -52,6 +52,39 @@ async def test_unavailable_when_no_provider_configured(monkeypatch):
         await llm.complete_json(system="s", user_text="u")
 
 
+async def test_accept_gate_escalates_to_stronger_model(monkeypatch):
+    # #52: a valid-but-incomplete parse from the first model must escalate to the next one.
+    monkeypatch.setattr(llm, "_providers", lambda: [_provider("nan:gemma4"), _provider("openai")])
+    calls = []
+
+    async def fake_call(provider, system, user_text, image):
+        calls.append(provider.name)
+        return {"complete": provider.name == "openai"}
+
+    monkeypatch.setattr(llm, "_call_provider", fake_call)
+
+    result = await llm.complete_json(
+        system="s", user_text="u", accept=lambda data: data["complete"]
+    )
+    assert result.provider_used == "openai"
+    assert result.is_fallback is True
+    assert calls == ["nan:gemma4", "openai"]
+
+
+async def test_accept_gate_returns_best_effort_when_all_rejected(monkeypatch):
+    # If no model satisfies the gate, the strongest model's parse is returned, not an error.
+    monkeypatch.setattr(llm, "_providers", lambda: [_provider("nan:gemma4"), _provider("openai")])
+
+    async def fake_call(provider, system, user_text, image):
+        return {"from": provider.name}
+
+    monkeypatch.setattr(llm, "_call_provider", fake_call)
+
+    result = await llm.complete_json(system="s", user_text="u", accept=lambda data: False)
+    assert result.provider_used == "openai"  # last (strongest) attempt kept as best effort
+    assert result.data == {"from": "openai"}
+
+
 async def test_bad_output_reports_finish_reason(monkeypatch):
     # A truncated JSON body (finish_reason=length) — what a too-large statement produces.
     payload = {"choices": [{"message": {"content": '{"transactions": [{"a": 1}'}, "finish_reason": "length"}]}

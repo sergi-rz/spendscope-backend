@@ -129,6 +129,9 @@ Return ONLY a JSON object:
     { "description": "product name as printed", "amount": 1.20, "category_suggestion": "Group / Subgroup" }
   ],
   "total_parsed": 0.00,
+  "ticket_total": 0.00,
+  "subtotal": 0.00,
+  "ticket_date": "YYYY-MM-DD",
   "movements": null
 }
 
@@ -136,7 +139,15 @@ Rules:
 - amount is the line total for that item (quantity x unit price), as a positive number.
 - category_suggestion is a short, human-readable hint like "Alimentación / Lácteos". It is a hint only.
 - total_parsed is the sum of ALL the item amounts you extracted.
-- Ignore subtotals, taxes lines, totals, change, and payment-method lines — only real products.
+- ticket_total is the amount ACTUALLY PAID, READ from the printed total line ("TOTAL A PAGAR",
+  "TOTAL", "IMPORTE", "VENTA", "AMOUNT PAID"...), as a positive number. Do NOT compute it from the
+  items — copy the figure printed on the document. null if no total is printed.
+- subtotal is the printed "SUBTOTAL" (the sum before coupons/loyalty discounts), as a positive
+  number, READ from the document. null if no subtotal line is printed.
+- ticket_date is the purchase date printed on the receipt, as ISO YYYY-MM-DD. Infer the year from
+  context if needed. null if no date is visible.
+- The items array still contains ONLY real products: do not add subtotal/total/tax/change/
+  payment-method lines AS items — but DO read the total, subtotal and date into their own fields above.
 - Preserve the original language of the descriptions.
 - "movements": usually null. It is a SINGLE purchase (a receipt/ticket, or one order) → leave it null
   and just fill "items". BUT if the document clearly shows SEVERAL INDEPENDENT purchases (an order
