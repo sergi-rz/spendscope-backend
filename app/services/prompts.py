@@ -146,8 +146,14 @@ Rules:
   number, READ from the document. null if no subtotal line is printed.
 - ticket_date is the purchase date printed on the receipt, as ISO YYYY-MM-DD. Infer the year from
   context if needed. null if no date is visible.
-- The items array still contains ONLY real products: do not add subtotal/total/tax/change/
-  payment-method lines AS items — but DO read the total, subtotal and date into their own fields above.
+- The items array contains ONLY real purchased products. NEVER list as items, no matter how they
+  look: the VAT/tax table (any line with a % and its BASE/CUOTA columns), SUBTOTAL, TOTAL, TOTAL A
+  PAGAR, VENTA, IMPORTE, loyalty/rewards lines (VENTAJAS, ACUMULADO, DESCUENTOS, CLUB, CHEQUE,
+  SALDO), coupons (DTO. CUPON / DTO. CHEQUE), change (CAMBIO) and payment/card lines (VISA,
+  CONTACTLESS, etc.). Read the total, subtotal and date into their OWN fields above instead.
+- A bare number, a percentage, or a quantity expression like "2 x ( 2,09 )" is NOT a product — skip it.
+- Sanity check before answering: the item amounts should add up to approximately the printed
+  subtotal. If your items sum to much more than the subtotal, you included non-product lines — remove them.
 - Preserve the original language of the descriptions.
 - "movements": usually null. It is a SINGLE purchase (a receipt/ticket, or one order) → leave it null
   and just fill "items". BUT if the document clearly shows SEVERAL INDEPENDENT purchases (an order

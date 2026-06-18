@@ -183,6 +183,37 @@ def test_completeness_gate_rejects_empty_items():
     assert enrich_router._completeness_ok({"items": [], "subtotal": 50.0}) is False
 
 
+def test_parse_items_drops_non_product_lines():
+    # #54: totals, VAT table, loyalty, coupons and bare numbers must not leak into the breakdown.
+    raw = [
+        {"description": "Leche 1L", "amount": 1.20},
+        {"description": "SUBTOTAL", "amount": 219.64},
+        {"description": "TOTAL A PAGAR", "amount": 211.58},
+        {"description": "4,00%", "amount": 45.56},
+        {"description": "45,56", "amount": 45.56},
+        {"description": "DTO. CUPON 6X50 EUR", "amount": 6.00},
+        {"description": "VENTAJAS OBTENIDAS", "amount": 16.28},
+        {"description": "2 x ( 2,09 )", "amount": 4.18},
+        {"description": "Pan", "amount": 1.80},
+    ]
+    items = enrich_router._parse_items(raw)
+    assert [i.description for i in items] == ["Leche 1L", "Pan"]
+
+
+def test_flatten_items_drops_amount_equal_to_total(client):
+    # Even with a product-looking description, an amount equal to the printed total is the total.
+    data = {
+        "items": [
+            {"description": "Compra", "amount": 211.58},
+            {"description": "Leche", "amount": 1.20},
+        ],
+        "ticket_total": 211.58,
+        "subtotal": 219.64,
+    }
+    items = enrich_router._flatten_items(data)
+    assert [i.description for i in items] == ["Leche"]
+
+
 def test_enrich_not_premium_403(client, monkeypatch):
     monkeypatch.setattr(enrich_router.revenuecat, "is_premium", _premium(False))
     resp = client.post(

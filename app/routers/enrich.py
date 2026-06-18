@@ -6,6 +6,7 @@ Premium-gated: the backend validates the subscription with RevenueCat. Non-premi
 from __future__ import annotations
 
 import logging
+import re
 
 from fastapi import APIRouter, HTTPException
 
@@ -70,6 +71,27 @@ async def enrich(req: EnrichRequest) -> EnrichResponse:
         return response
 
 
+# Lines that are NOT purchased products but commonly leak into an OCR'd receipt and inflate the
+# breakdown (#54): totals, the VAT table, loyalty/rewards, coupons and payment lines. Matched as a
+# case-insensitive substring of the item description.
+_NON_PRODUCT_TOKENS = (
+    "SUBTOTAL", "TOTAL", "IMPORTE", "VENTA", "VENTAJAS", "ACUMULADO", "DESCUENTOS",
+    "CUOTA", "REDIMIDO", "CAMBIO", "CONTACTLESS", "SALDO", "SOCIO", "CLUB", "CHEQUE",
+    "CUPON", "CUPÓN", "DTO.", "NRF", "TARJETA", "VISA", "MASTERCARD", "BASE",
+)
+# A description that's just a number / percent / quantity expression ("45,56", "4,00%",
+# "2 x ( 2,09 )") is a totals/tax/quantity line, not a product. Requires at least one digit so a
+# short letter-only product name isn't mistaken for one.
+_NUMERIC_DESC = re.compile(r"^(?=.*\d)[\d.,%\s/xX()€·*-]+$")
+
+
+def _is_non_product(description: str) -> bool:
+    upper = description.upper()
+    if any(token in upper for token in _NON_PRODUCT_TOKENS):
+        return True
+    return bool(_NUMERIC_DESC.match(description))
+
+
 def _parse_items(raw) -> list[EnrichedItem]:
     items: list[EnrichedItem] = []
     if not isinstance(raw, list):
@@ -82,7 +104,7 @@ def _parse_items(raw) -> list[EnrichedItem]:
         except (TypeError, ValueError):
             continue
         description = str(row.get("description") or "").strip()
-        if not description:
+        if not description or _is_non_product(description):
             continue
         items.append(
             EnrichedItem(
@@ -120,11 +142,20 @@ def _parse_movements(raw) -> list[EnrichMovement]:
 
 
 def _flatten_items(data: dict) -> list[EnrichedItem]:
-    """The item list, drawing from `items` or, failing that, the per-movement items (#35)."""
+    """The item list, drawing from `items` or, failing that, the per-movement items (#35).
+    Drops any line whose amount equals the printed total or subtotal — those are the totals
+    themselves misread as a product, which would otherwise double the breakdown (#54)."""
     items = _parse_items(data.get("items"))
     if not items:
         movements = _parse_movements(data.get("movements"))
         items = [item for movement in movements for item in movement.items]
+    blocked = {
+        round(abs(v), 2)
+        for v in (_as_float(data.get("ticket_total")), _as_float(data.get("subtotal")))
+        if v
+    }
+    if blocked:
+        items = [item for item in items if round(item.amount, 2) not in blocked]
     return items
 
 
