@@ -59,6 +59,9 @@ Rules:
   Map by business type, e.g.: a sporting-goods/outdoor shop → shopping; a parking operator →
   parking/transport; a grocery/supermarket → groceries; a pharmacy → health; an airline/hotel →
   travel. If the name genuinely gives no clue about the business, return null instead of guessing.
+- A supermarket/grocery store charge is the GENERAL groceries category (e.g. "Groceries / Supermarket").
+  Do NOT pick a specific food subcategory (Fruit, Meat, Fish, Dairy...) for a bank charge — one charge
+  doesn't reveal the basket; those specific food subcategories are only for itemized receipt lines.
 - A loan/mortgage repayment or "amortización de préstamo" is a LOAN/DEBT category, not a bank fee.
 - A transfer between the user's own accounts is a neutral internal transfer, not income or spending.
 - "suggested_category": usually null. Only when NO allowed label fits well AND a clearly better,
@@ -102,6 +105,9 @@ Rules:
   Map by business type, e.g.: a sporting-goods/outdoor shop → shopping; a parking operator →
   parking/transport; a grocery/supermarket → groceries; a pharmacy → health; an airline/hotel →
   travel. If the name genuinely gives no clue about the business, return null instead of guessing.
+- A supermarket/grocery store charge is the GENERAL groceries category (e.g. "Groceries / Supermarket").
+  Do NOT pick a specific food subcategory (Fruit, Meat, Fish, Dairy...) for a bank charge — one charge
+  doesn't reveal the basket; those specific food subcategories are only for itemized receipt lines.
 - A loan/mortgage repayment or "amortización de préstamo" is a LOAN/DEBT category, not a bank fee.
 - A transfer between the user's own accounts is a neutral internal transfer, not income or spending.
 - "suggested_category": usually null. Only when NO allowed label fits well AND a clearly better,
