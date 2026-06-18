@@ -1,4 +1,5 @@
 from app.services import llm, revenuecat
+from app.services.prompts import enrich_user_prompt
 from app.routers import enrich as enrich_router
 
 
@@ -212,6 +213,37 @@ def test_flatten_items_drops_amount_equal_to_total(client):
     }
     items = enrich_router._flatten_items(data)
     assert [i.description for i in items] == ["Leche"]
+
+
+def test_enrich_prompt_includes_allowed_categories():
+    # #55: the enricher must pick from the real taxonomy so suggestions resolve in the app.
+    prompt = enrich_user_prompt(-211.58, ["Alimentación / Fruta y verdura", "Hogar / Limpieza"])
+    assert "allowed_categories" in prompt
+    assert "Alimentación / Fruta y verdura" in prompt
+    assert "VERBATIM" in prompt
+
+
+def test_enrich_prompt_free_form_without_categories():
+    prompt = enrich_user_prompt(-10.0, [])
+    assert "allowed_categories" not in prompt
+
+
+def test_enrich_forwards_categories_to_prompt(client, monkeypatch):
+    captured = {}
+
+    async def fake(system, user_text, image_data_uri=None, accept=None):
+        captured["user_text"] = user_text
+        return llm.LLMResult(data=ITEMS, provider_used="nan", is_fallback=False, primary_error=None)
+
+    monkeypatch.setattr(enrich_router.revenuecat, "is_premium", _premium(True))
+    monkeypatch.setattr(enrich_router.llm, "complete_json", fake)
+    resp = client.post(
+        "/api/v1/enrich",
+        json={"user_id": "u1", "input_type": "text", "content": "t", "transaction_amount": -3.0,
+              "categories": ["Alimentación / Carne", "Mascota"]},
+    )
+    assert resp.status_code == 200
+    assert "Alimentación / Carne" in captured["user_text"]
 
 
 def test_enrich_not_premium_403(client, monkeypatch):

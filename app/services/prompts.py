@@ -137,7 +137,8 @@ Return ONLY a JSON object:
 
 Rules:
 - amount is the line total for that item (quantity x unit price), as a positive number.
-- category_suggestion is a short, human-readable hint like "Alimentación / Lácteos". It is a hint only.
+- category_suggestion: when the user message gives an allowed_categories list, copy the best-matching
+  label from it VERBATIM; otherwise a short human-readable hint like "Alimentación / Lácteos".
 - total_parsed is the sum of ALL the item amounts you extracted.
 - ticket_total is the amount ACTUALLY PAID, READ from the printed total line ("TOTAL A PAGAR",
   "TOTAL", "IMPORTE", "VENTA", "AMOUNT PAID"...), as a positive number. Do NOT compute it from the
@@ -220,8 +221,18 @@ def categorize_batch_user_prompt(
     )
 
 
-def enrich_user_prompt(transaction_amount: float) -> str:
-    return (
+def enrich_user_prompt(transaction_amount: float, categories: list[str] | None = None) -> str:
+    base = (
         "Parse the receipt into line items. For reference, the transaction total is "
         f"{transaction_amount:.2f} (negative means money spent). Extract the product lines."
     )
+    if categories:
+        base += (
+            "\n\nFor each item, set category_suggestion to the SINGLE best-fitting category from the "
+            "list below — copy it VERBATIM, exactly as written, do not invent new labels. A supermarket "
+            "receipt mixes food with non-food: file food items under the matching food category, and "
+            "non-food items (cleaning, toiletries, baby, pet, etc.) under THEIR OWN category, not under "
+            "groceries. Use null only if truly nothing fits.\nallowed_categories: "
+            + json.dumps(categories, ensure_ascii=False)
+        )
+    return base

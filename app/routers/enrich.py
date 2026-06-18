@@ -43,7 +43,7 @@ async def enrich(req: EnrichRequest) -> EnrichResponse:
             metrics.status = 400
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        user_text = enrich_user_prompt(req.transaction_amount)
+        user_text = enrich_user_prompt(req.transaction_amount, req.categories)
         if modality == "vision":
             image_uri: str | None = payload
         else:

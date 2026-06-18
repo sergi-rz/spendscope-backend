@@ -135,6 +135,9 @@ class EnrichRequest(BaseModel):
     input_type: InputType
     content: str
     transaction_amount: float
+    # Allowed category labels ("Parent / Child") so the enricher files each product under the real
+    # taxonomy instead of inventing labels that don't resolve in the app (#55). Empty = free-form hint.
+    categories: list[str] = Field(default_factory=list)
 
 
 class EnrichedItem(BaseModel):
