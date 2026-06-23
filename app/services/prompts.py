@@ -21,7 +21,8 @@ Return ONLY a JSON object with this exact shape:
       "amount": -67.82,
       "balance": 1234.56,
       "transaction_type": "e.g. card payment, transfer, direct debit, Bizum, fee",
-      "notes": ""
+      "notes": "",
+      "source_category": null
     }
   ]
 }
@@ -33,6 +34,11 @@ Rules:
 - balance is the running balance if present, else null.
 - Do NOT invent transactions. If a field is unknown, use null (or "" for notes).
 - Preserve the original language of the concept text. Do not translate it.
+- source_category: if the input ALREADY has a category (and/or subcategory) column — typical of an
+  export from another finance app such as Mint, YNAB, Fintonic or Money Lover — copy that value
+  VERBATIM into source_category. If both a category and a subcategory column exist, combine them as
+  "Category / Subcategory". If there is no category column at all, use null. Do NOT categorize or
+  invent it yourself — only copy what is literally present in the file.
 - Return the JSON object only — no markdown, no commentary."""
 
 CATEGORIZE_SYSTEM = """You categorize a single bank transaction. You are given the transaction \
@@ -64,6 +70,11 @@ Rules:
   doesn't reveal the basket; those specific food subcategories are only for itemized receipt lines.
 - A loan/mortgage repayment or "amortización de préstamo" is a LOAN/DEBT category, not a bank fee.
 - A transfer between the user's own accounts is a neutral internal transfer, not income or spending.
+- Some transactions include a "source_category": the label the user already gave this transaction in
+  ANOTHER finance app (from its export). TREAT IT AS A STRONG HINT — map it to the allowed label that
+  means the same thing (translate/normalize as needed; e.g. "Coffee Shops" → a cafe label, "Comida"
+  → groceries) and use a HIGH confidence. Only if no allowed label reasonably matches it, propose it
+  as a new category via "suggested_category". Prefer source_category over guessing from the concept.
 - "suggested_category": usually null. Only when NO allowed label fits well AND a clearly better,
   more specific category would — propose a NEW one as
   { "name": "Short Name", "parent": "<an existing top-level label it would sit under, or null>",
@@ -110,6 +121,11 @@ Rules:
   doesn't reveal the basket; those specific food subcategories are only for itemized receipt lines.
 - A loan/mortgage repayment or "amortización de préstamo" is a LOAN/DEBT category, not a bank fee.
 - A transfer between the user's own accounts is a neutral internal transfer, not income or spending.
+- Some transactions include a "source_category": the label the user already gave this transaction in
+  ANOTHER finance app (from its export). TREAT IT AS A STRONG HINT — map it to the allowed label that
+  means the same thing (translate/normalize as needed; e.g. "Coffee Shops" → a cafe label, "Comida"
+  → groceries) and use a HIGH confidence. Only if no allowed label reasonably matches it, propose it
+  as a new category via "suggested_category". Prefer source_category over guessing from the concept.
 - "suggested_category": usually null. Only when NO allowed label fits well AND a clearly better,
   more specific category would — propose a NEW one as
   { "name": "Short Name", "parent": "<an existing top-level label it would sit under, or null>",
@@ -212,6 +228,7 @@ def categorize_batch_user_prompt(
                 "amount": it.amount,
                 "transaction_type": it.transaction_type,
                 "notes": it.notes,
+                "source_category": getattr(it, "source_category", None),
             }
             for i, it in enumerate(items)
         ],

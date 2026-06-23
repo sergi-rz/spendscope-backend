@@ -126,6 +126,7 @@ def _rows(data: dict) -> list[ParsedTransaction]:
                     balance=_as_float(row.get("balance")),
                     transaction_type=_as_str(row.get("transaction_type")),
                     notes=_as_str(row.get("notes")) or "",
+                    source_category=_as_str(row.get("source_category")),
                 )
             )
         except (TypeError, ValueError):

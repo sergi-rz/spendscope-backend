@@ -209,6 +209,36 @@ def test_categorize_batch_one_call_for_many_items(client, monkeypatch):
     assert calls["n"] == 1, "the whole batch must be a single LLM call"
 
 
+def test_categorize_batch_forwards_source_category_and_skips_cache(client, monkeypatch):
+    # An imported item carries the user's category from another app (#66): it must reach the prompt
+    # as a strong hint, and it must NOT be served from / written to the concept cache.
+    captured = {}
+    calls = {"n": 0}
+
+    async def _capture(*args, **kwargs):
+        calls["n"] += 1
+        captured["user_text"] = kwargs.get("user_text")
+        return llm.LLMResult(
+            data={"results": [{"index": 0, "category": CATEGORIES[0], "confidence": 0.95}]},
+            provider_used="x", is_fallback=False, primary_error=None,
+        )
+
+    monkeypatch.setattr(cat_router.llm, "complete_json", _capture)
+    payload = {
+        "user_id": "u1",
+        "items": [{"concept": "SRCCAT UNIQUE", "amount": -3.0, "source_category": "Coffee Shops"}],
+        "categories": CATEGORIES,
+    }
+    first = client.post("/api/v1/categorize/batch", json=payload)
+    assert first.status_code == 200
+    assert "Coffee Shops" in captured["user_text"]
+    assert first.json()["results"][0]["category"] == CATEGORIES[0]
+
+    # Same concept again, hinted again, must hit the LLM again (no cache shortcut).
+    client.post("/api/v1/categorize/batch", json=payload)
+    assert calls["n"] == 2
+
+
 def test_categorize_batch_unknown_label_is_null(client, monkeypatch):
     monkeypatch.setattr(
         cat_router.llm, "complete_json", _fake({"results": [{"index": 0, "category": "Nope"}]})

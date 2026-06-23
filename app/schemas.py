@@ -31,6 +31,9 @@ class ParsedTransaction(BaseModel):
     balance: float | None = None
     transaction_type: str | None = None
     notes: str | None = ""
+    # The category the file already carried (e.g. an export from another finance app like Mint/YNAB).
+    # Copied verbatim from the input; null when the file has no category column (#66).
+    source_category: str | None = None
 
 
 class ParseMetadata(BaseModel):
@@ -103,6 +106,9 @@ class CategorizeItem(BaseModel):
     amount: float
     transaction_type: str | None = None
     notes: str | None = None
+    # The user's own category for this transaction from another app's export, when the app couldn't
+    # match it to the local tree on-device. A strong hint to map or propose, not guess (#66).
+    source_category: str | None = None
 
 
 class CategorizeBatchRequest(BaseModel):

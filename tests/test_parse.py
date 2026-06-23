@@ -48,9 +48,31 @@ def test_parse_text_ok(client, monkeypatch):
     assert body["metadata"]["bank_detected"] is None  # ignored (#27)
     first = body["transactions"][0]
     # snake_case keys, exactly what the app decodes.
-    assert set(first) == {"date", "concept", "amount", "balance", "transaction_type", "notes"}
+    assert set(first) == {
+        "date", "concept", "amount", "balance", "transaction_type", "notes", "source_category",
+    }
     assert first["concept"] == "MERCADONA"
     assert first["amount"] == -67.82
+
+
+def test_parse_extracts_source_category(client, monkeypatch):
+    # An export from another finance app already carries a category column (#66).
+    data = {
+        "transactions": [
+            {"date": "2026-05-01", "concept": "STARBUCKS", "amount": -4.5,
+             "source_category": "Food & Dining / Coffee Shops"},
+            {"date": "2026-05-02", "concept": "RENT", "amount": -900.0},  # no category column
+        ]
+    }
+    monkeypatch.setattr(parse_router.llm, "complete_json", _fake_result(data))
+    resp = client.post(
+        "/api/v1/parse",
+        json={"user_id": "u1", "input_type": "text", "content": "csv...", "filename": "mint.csv"},
+    )
+    assert resp.status_code == 200
+    rows = resp.json()["transactions"]
+    assert rows[0]["source_category"] == "Food & Dining / Coffee Shops"
+    assert rows[1]["source_category"] is None
 
 
 def test_parse_skips_malformed_rows(client, monkeypatch):

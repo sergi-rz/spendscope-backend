@@ -101,7 +101,9 @@ async def categorize_batch(req: CategorizeBatchRequest) -> CategorizeBatchRespon
         misses: list[int] = []
 
         for i, item in enumerate(req.items):
-            cached = cache.get(item.concept, item.amount)
+            # Items carrying a source_category (an import from another app, #66) bypass the
+            # concept cache: their mapping depends on that hint, not just the concept.
+            cached = None if item.source_category else cache.get(item.concept, item.amount)
             if cached and cached[0].strip().lower() in allowed:
                 results[i] = CategorizeResult(
                     index=i, category=allowed[cached[0].strip().lower()], confidence=cached[1]
@@ -124,7 +126,9 @@ async def categorize_batch(req: CategorizeBatchRequest) -> CategorizeBatchRespon
                     category, confidence, suggestion, pattern = parsed.get(
                         local_idx, (None, None, None, None)
                     )
-                    if category is not None:
+                    # Don't cache a source_category-driven mapping under the bare concept (#66): the
+                    # same concept without a hint should still categorize on its own merits.
+                    if category is not None and not req.items[global_idx].source_category:
                         cache.put(
                             req.items[global_idx].concept, req.items[global_idx].amount,
                             category, confidence,
