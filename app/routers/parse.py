@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 
 from ..config import settings
 from ..schemas import ParsedTransaction, ParseMetadata, ParseRequest, ParseResponse
-from ..services import llm
+from ..services import llm, pricing
 from ..services.preprocess import PreprocessError, prepare
 from ..services.prompts import PARSE_SYSTEM
 from .common import enforce_rate_limit, timed
@@ -28,7 +28,7 @@ _DATA_LINE = re.compile(r"[0-9][0-9.,]*[.,][0-9]{2}([^0-9]|$)")
 async def parse(req: ParseRequest) -> ParseResponse:
     enforce_rate_limit(req.user_id, "parse")
 
-    with timed("parse") as metrics:
+    with timed("parse", req.user_id) as metrics:
         try:
             modality, payload = prepare(req.input_type, req.content, req.filename)
         except PreprocessError as exc:
@@ -41,12 +41,20 @@ async def parse(req: ParseRequest) -> ParseResponse:
             calls = [_run_parse("Parse this bank or card statement image into transactions.", payload)]
         else:
             chunks = _chunk_statement(payload)
-            calls = [_run_parse(f"Parse this statement into transactions:\n\n{chunk}", None) for chunk in chunks]
+            # Big multi-chunk statements go straight to OpenAI: it benchmarked faster and far more
+            # reliable than gemma's tail latency on large parses (#bench, parse_large_route_chunks).
+            threshold = settings.parse_large_route_chunks
+            prefer_fallback = threshold > 0 and len(chunks) > threshold
+            calls = [
+                _run_parse(f"Parse this statement into transactions:\n\n{chunk}", None, prefer_fallback)
+                for chunk in chunks
+            ]
 
         results = await _gather_bounded(calls, settings.parse_chunk_concurrency)
 
         rows: list[ParsedTransaction] = []
         provider_used: str | None = None
+        model_used: str | None = None
         any_fallback = False
         primary_error: str | None = None
         succeeded = 0
@@ -56,8 +64,12 @@ async def parse(req: ParseRequest) -> ParseResponse:
                 continue
             succeeded += 1
             provider_used = provider_used or result.provider_used
+            model_used = model_used or result.model_used
             any_fallback = any_fallback or result.is_fallback
             primary_error = primary_error or result.primary_error
+            metrics.in_tokens += result.in_tokens
+            metrics.out_tokens += result.out_tokens
+            metrics.cost_usd += pricing.cost_usd(result.model_used, result.in_tokens, result.out_tokens)
             rows.extend(_rows(result.data))
 
         if succeeded == 0:
@@ -66,14 +78,20 @@ async def parse(req: ParseRequest) -> ParseResponse:
             raise HTTPException(status_code=502, detail="Parsing provider unavailable")
 
         metrics.provider_used = provider_used
+        metrics.model_used = model_used
         metrics.is_fallback = any_fallback
         metrics.primary_error = primary_error
         metrics.status = 200
         return ParseResponse(transactions=rows, metadata=ParseMetadata(bank_detected=None, count=len(rows)))
 
 
-async def _run_parse(user_text: str, image_uri: str | None) -> llm.LLMResult:
-    return await llm.complete_json(system=PARSE_SYSTEM, user_text=user_text, image_data_uri=image_uri)
+async def _run_parse(
+    user_text: str, image_uri: str | None, prefer_fallback: bool = False
+) -> llm.LLMResult:
+    return await llm.complete_json(
+        system=PARSE_SYSTEM, user_text=user_text, image_data_uri=image_uri,
+        prefer_fallback=prefer_fallback,
+    )
 
 
 async def _gather_bounded(coros: list, limit: int) -> list:

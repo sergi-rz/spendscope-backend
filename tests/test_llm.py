@@ -27,7 +27,7 @@ def _provider(name):
 
 
 async def test_falls_back_to_second_provider(monkeypatch):
-    monkeypatch.setattr(llm, "_providers", lambda: [_provider("nan_builders"), _provider("openai")])
+    monkeypatch.setattr(llm, "_providers", lambda *_a, **_k: [_provider("nan_builders"), _provider("openai")])
 
     calls = []
 
@@ -35,7 +35,7 @@ async def test_falls_back_to_second_provider(monkeypatch):
         calls.append(provider.name)
         if provider.name == "nan_builders":
             raise httpx.ConnectError("boom")
-        return {"ok": True}
+        return {"ok": True}, 0, 0
 
     monkeypatch.setattr(llm, "_call_provider", fake_call)
 
@@ -47,19 +47,19 @@ async def test_falls_back_to_second_provider(monkeypatch):
 
 
 async def test_unavailable_when_no_provider_configured(monkeypatch):
-    monkeypatch.setattr(llm, "_providers", lambda: [])
+    monkeypatch.setattr(llm, "_providers", lambda *_a, **_k: [])
     with pytest.raises(llm.LLMUnavailable):
         await llm.complete_json(system="s", user_text="u")
 
 
 async def test_accept_gate_escalates_to_stronger_model(monkeypatch):
     # #52: a valid-but-incomplete parse from the first model must escalate to the next one.
-    monkeypatch.setattr(llm, "_providers", lambda: [_provider("nan:gemma4"), _provider("openai")])
+    monkeypatch.setattr(llm, "_providers", lambda *_a, **_k: [_provider("nan:gemma4"), _provider("openai")])
     calls = []
 
     async def fake_call(provider, system, user_text, image):
         calls.append(provider.name)
-        return {"complete": provider.name == "openai"}
+        return {"complete": provider.name == "openai"}, 0, 0
 
     monkeypatch.setattr(llm, "_call_provider", fake_call)
 
@@ -73,10 +73,10 @@ async def test_accept_gate_escalates_to_stronger_model(monkeypatch):
 
 async def test_accept_gate_returns_best_effort_when_all_rejected(monkeypatch):
     # If no model satisfies the gate, the strongest model's parse is returned, not an error.
-    monkeypatch.setattr(llm, "_providers", lambda: [_provider("nan:gemma4"), _provider("openai")])
+    monkeypatch.setattr(llm, "_providers", lambda *_a, **_k: [_provider("nan:gemma4"), _provider("openai")])
 
     async def fake_call(provider, system, user_text, image):
-        return {"from": provider.name}
+        return {"from": provider.name}, 0, 0
 
     monkeypatch.setattr(llm, "_call_provider", fake_call)
 
@@ -124,11 +124,38 @@ def test_expand_pads_shorter_list_with_last():
     assert [p.model_vision for p in providers] == ["gemma4", "gemma4"]
 
 
+async def test_prefer_fallback_reorders_provider_chain(monkeypatch):
+    # Large statements route to the fallback (OpenAI) first, keeping the primary as backup (#bench).
+    monkeypatch.setattr(llm.settings, "primary_api_key", "k")
+    monkeypatch.setattr(llm.settings, "fallback_api_key", "k")
+    monkeypatch.setattr(llm.settings, "primary_model_text", "gemma4")
+    monkeypatch.setattr(llm.settings, "primary_model_vision", "gemma4")
+    monkeypatch.setattr(llm.settings, "fallback_model_text", "gpt-4o-mini")
+    monkeypatch.setattr(llm.settings, "fallback_model_vision", "gpt-4o-mini")
+
+    normal = [p.name for p in llm._providers(prefer_fallback=False)]
+    routed = [p.name for p in llm._providers(prefer_fallback=True)]
+    assert normal == ["nan_builders", "openai"]
+    assert routed == ["openai", "nan_builders"]
+
+
+async def test_complete_json_surfaces_tokens_and_model(monkeypatch):
+    monkeypatch.setattr(llm, "_providers", lambda *_a, **_k: [_provider("openai")])
+
+    async def fake_call(provider, system, user_text, image):
+        return {"ok": True}, 123, 45
+
+    monkeypatch.setattr(llm, "_call_provider", fake_call)
+    result = await llm.complete_json(system="s", user_text="u")
+    assert (result.in_tokens, result.out_tokens) == (123, 45)
+    assert result.model_used == "m"  # _provider() sets model_text="m"
+
+
 async def test_three_tier_chain_walks_in_order(monkeypatch):
     monkeypatch.setattr(
         llm,
         "_providers",
-        lambda: [_provider("nan:gemma4"), _provider("nan:qwen3.6"), _provider("openai")],
+        lambda *_a, **_k: [_provider("nan:gemma4"), _provider("nan:qwen3.6"), _provider("openai")],
     )
     calls = []
 
@@ -136,7 +163,7 @@ async def test_three_tier_chain_walks_in_order(monkeypatch):
         calls.append(provider.name)
         if provider.name != "openai":
             raise httpx.ConnectError("boom")
-        return {"ok": True}
+        return {"ok": True}, 0, 0
 
     monkeypatch.setattr(llm, "_call_provider", fake_call)
 

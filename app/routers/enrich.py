@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException
 
 from ..config import settings
 from ..schemas import EnrichedItem, EnrichMovement, EnrichRequest, EnrichResponse
-from ..services import llm, revenuecat
+from ..services import llm, pricing, revenuecat
 from ..services.preprocess import PreprocessError, prepare
 from ..services.prompts import ENRICH_SYSTEM, enrich_user_prompt
 from .common import enforce_rate_limit, timed
@@ -35,7 +35,7 @@ async def enrich(req: EnrichRequest) -> EnrichResponse:
     if not premium:
         raise HTTPException(status_code=403, detail="Premium subscription required")
 
-    with timed("enrich") as metrics:
+    with timed("enrich", req.user_id) as metrics:
         try:
             # EnrichRequest carries no filename; preprocess sniffs magic bytes to route PDF/image.
             modality, payload = prepare(req.input_type, req.content)
@@ -63,8 +63,12 @@ async def enrich(req: EnrichRequest) -> EnrichResponse:
             raise HTTPException(status_code=502, detail="Enrichment provider unavailable") from exc
 
         metrics.provider_used = result.provider_used
+        metrics.model_used = result.model_used
         metrics.is_fallback = result.is_fallback
         metrics.primary_error = result.primary_error
+        metrics.in_tokens = result.in_tokens
+        metrics.out_tokens = result.out_tokens
+        metrics.cost_usd = pricing.cost_usd(result.model_used, result.in_tokens, result.out_tokens)
 
         response = _to_response(result.data, req.transaction_amount)
         metrics.status = 200

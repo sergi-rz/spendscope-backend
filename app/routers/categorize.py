@@ -18,7 +18,7 @@ from ..schemas import (
     CategorizeResult,
     SuggestedCategory,
 )
-from ..services import cache, llm
+from ..services import cache, llm, pricing
 from ..services.prompts import (
     CATEGORIZE_BATCH_SYSTEM,
     CATEGORIZE_SYSTEM,
@@ -41,7 +41,7 @@ async def categorize(req: CategorizeRequest) -> CategorizeResponse:
 
     allowed = {c.strip().lower(): c for c in req.categories}
 
-    with timed("categorize") as metrics:
+    with timed("categorize", req.user_id) as metrics:
         # Cache hit: only reuse a label the app still offers (renamed categories never resurface).
         cached = cache.get(req.concept, req.amount)
         if cached and cached[0].strip().lower() in allowed:
@@ -62,8 +62,12 @@ async def categorize(req: CategorizeRequest) -> CategorizeResponse:
             raise HTTPException(status_code=502, detail="Categorization provider unavailable") from exc
 
         metrics.provider_used = result.provider_used
+        metrics.model_used = result.model_used
         metrics.is_fallback = result.is_fallback
         metrics.primary_error = result.primary_error
+        metrics.in_tokens = result.in_tokens
+        metrics.out_tokens = result.out_tokens
+        metrics.cost_usd = pricing.cost_usd(result.model_used, result.in_tokens, result.out_tokens)
 
         category = _resolve_label(result.data.get("category"), allowed)
         confidence = _as_confidence(result.data.get("confidence"))
@@ -96,7 +100,7 @@ async def categorize_batch(req: CategorizeBatchRequest) -> CategorizeBatchRespon
 
     allowed = {c.strip().lower(): c for c in req.categories}
 
-    with timed("categorize_batch") as metrics:
+    with timed("categorize_batch", req.user_id) as metrics:
         results: list[CategorizeResult | None] = [None] * len(req.items)
         misses: list[int] = []
 
@@ -119,8 +123,14 @@ async def categorize_batch(req: CategorizeBatchRequest) -> CategorizeBatchRespon
             try:
                 result = await llm.complete_json(system=CATEGORIZE_BATCH_SYSTEM, user_text=prompt)
                 metrics.provider_used = result.provider_used
+                metrics.model_used = result.model_used
                 metrics.is_fallback = result.is_fallback
                 metrics.primary_error = result.primary_error
+                metrics.in_tokens = result.in_tokens
+                metrics.out_tokens = result.out_tokens
+                metrics.cost_usd = pricing.cost_usd(
+                    result.model_used, result.in_tokens, result.out_tokens
+                )
                 parsed = _parse_batch(result.data, allowed, req.categories, req.rejected_suggestions)
                 for local_idx, global_idx in enumerate(misses):
                     category, confidence, suggestion, pattern = parsed.get(

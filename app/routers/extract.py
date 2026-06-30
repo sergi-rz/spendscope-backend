@@ -27,7 +27,7 @@ router = APIRouter()
 async def extract(req: ExtractRequest) -> ExtractResponse:
     enforce_rate_limit(req.user_id, "extract")
 
-    with timed("extract") as metrics:
+    with timed("extract", req.user_id) as metrics:
         try:
             modality, payload = prepare(req.input_type, req.content, req.filename)
         except PreprocessError as exc:

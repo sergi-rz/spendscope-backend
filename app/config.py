@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     # Batches sent to the LLM concurrently. 1 = sequential: the providers appear to serialize anyway,
     # and parallel httpx calls proved unstable, so sequential is both safer and not slower.
     parse_chunk_concurrency: int = 1
+    # Size-based routing knob (bench_llm.py). A statement that splits into MORE than this many chunks
+    # is routed straight to the fallback provider (OpenAI) first, primary kept as backup.
+    # DISABLED by default (0): the benchmark did NOT justify it — gemma4 is much faster on the common
+    # (small) case, and on large multi-chunk parses neither model wins clearly on speed (both ~100-250s,
+    # both occasionally fail), while OpenAI costs ~$0.30 per 1000-line statement. The mechanism stays
+    # in place so we can flip it on from real production cost/latency data (request_log) if it ever pays.
+    parse_large_route_chunks: int = 0
     # When true, log the model's raw output (truncated) on a parse failure, to debug LLMBadOutput.
     # Off by default: the raw output is user financial data and we don't want it in logs normally.
     llm_debug_raw: bool = False

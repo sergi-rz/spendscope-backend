@@ -80,25 +80,28 @@ def _expand(
     return providers
 
 
-def _providers() -> list[Provider]:
+def _providers(prefer_fallback: bool = False) -> list[Provider]:
     """Ordered provider chain (SPECS §11.5). N tiers: each credential set may expose
-    several models, e.g. nan.builders `gemma4 → qwen3.6`, then OpenAI `gpt-4o-mini`."""
-    return [
-        *_expand(
-            "nan_builders",
-            settings.primary_base_url,
-            settings.primary_api_key,
-            settings.primary_model_text,
-            settings.primary_model_vision,
-        ),
-        *_expand(
-            "openai",
-            settings.fallback_base_url,
-            settings.fallback_api_key,
-            settings.fallback_model_text,
-            settings.fallback_model_vision,
-        ),
-    ]
+    several models, e.g. nan.builders `gemma4 → qwen3.6`, then OpenAI `gpt-4o-mini`.
+
+    `prefer_fallback` flips the order so the fallback set (OpenAI) is tried first with the
+    primary kept as backup — used for large statements where OpenAI benchmarked faster and
+    more reliable than gemma's tail latency (#bench)."""
+    primary = _expand(
+        "nan_builders",
+        settings.primary_base_url,
+        settings.primary_api_key,
+        settings.primary_model_text,
+        settings.primary_model_vision,
+    )
+    fallback = _expand(
+        "openai",
+        settings.fallback_base_url,
+        settings.fallback_api_key,
+        settings.fallback_model_text,
+        settings.fallback_model_vision,
+    )
+    return [*fallback, *primary] if prefer_fallback else [*primary, *fallback]
 
 
 @dataclass
@@ -107,6 +110,9 @@ class LLMResult:
     provider_used: str
     is_fallback: bool
     primary_error: str | None
+    model_used: str | None = None
+    in_tokens: int = 0
+    out_tokens: int = 0
 
 
 def _build_messages(system: str, user_text: str, image_data_uri: str | None) -> list[dict]:
@@ -141,7 +147,8 @@ def _extract_json(content: str) -> dict:
 
 async def _call_provider(
     provider: Provider, system: str, user_text: str, image_data_uri: str | None
-) -> dict:
+) -> tuple[dict, int, int]:
+    """Return (parsed_json, prompt_tokens, completion_tokens) for one provider call."""
     model = provider.model_vision if image_data_uri else provider.model_text
     body = {
         "model": model,
@@ -173,9 +180,13 @@ async def _call_provider(
     except (KeyError, IndexError, TypeError) as exc:
         raise LLMBadOutput(f"{provider.name} response missing content") from exc
 
+    usage = payload.get("usage") or {}
+    in_tokens = int(usage.get("prompt_tokens") or 0)
+    out_tokens = int(usage.get("completion_tokens") or 0)
+
     finish_reason = choice.get("finish_reason") if isinstance(choice, dict) else None
     try:
-        return _extract_json(content)
+        return _extract_json(content), in_tokens, out_tokens
     except LLMBadOutput as exc:
         # finish_reason="length" means the JSON was cut off by max_tokens (statement too big for one
         # call), not malformed — surfacing it makes LLMBadOutput in the logs/DB actionable.
@@ -195,6 +206,7 @@ async def complete_json(
     user_text: str,
     image_data_uri: str | None = None,
     accept: Callable[[dict], bool] | None = None,
+    prefer_fallback: bool = False,
 ) -> LLMResult:
     """Run the prompt through the provider chain and return parsed JSON + provider metadata.
 
@@ -204,7 +216,7 @@ async def complete_json(
     escalate to the next, stronger provider. If no provider satisfies the gate, the strongest
     model's parse is returned as a best effort rather than failing.
     """
-    providers = [p for p in _providers() if p.configured]
+    providers = [p for p in _providers(prefer_fallback) if p.configured]
     if not providers:
         raise LLMUnavailable("no LLM provider configured (set PRIMARY_API_KEY / FALLBACK_API_KEY)")
 
@@ -212,7 +224,9 @@ async def complete_json(
     soft_rejected: LLMResult | None = None
     for index, provider in enumerate(providers):
         try:
-            data = await _call_provider(provider, system, user_text, image_data_uri)
+            data, in_tokens, out_tokens = await _call_provider(
+                provider, system, user_text, image_data_uri
+            )
         except (httpx.HTTPError, LLMBadOutput) as exc:
             message = str(exc)
             logger.warning("provider %s failed: %s", provider.name, message)
@@ -225,6 +239,9 @@ async def complete_json(
             provider_used=provider.name,
             is_fallback=index > 0,
             primary_error=primary_error,
+            model_used=(provider.model_vision if image_data_uri else provider.model_text),
+            in_tokens=in_tokens,
+            out_tokens=out_tokens,
         )
         if accept is None or accept(data):
             return result

@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from fastapi import HTTPException
 
 from ..services import rate_limit
-from ..services.oplog import RequestMetrics
+from ..services.oplog import RequestMetrics, anon_user
 
 
 def enforce_rate_limit(user_id: str, endpoint: str) -> None:
@@ -23,9 +23,9 @@ def enforce_rate_limit(user_id: str, endpoint: str) -> None:
 
 
 @contextmanager
-def timed(endpoint: str):
+def timed(endpoint: str, user_id: str | None = None):
     """Yield a RequestMetrics, stamping latency and recording it on exit (success or error)."""
-    metrics = RequestMetrics(endpoint=endpoint)
+    metrics = RequestMetrics(endpoint=endpoint, user_hash=anon_user(user_id))
     started = time.perf_counter()
     try:
         yield metrics

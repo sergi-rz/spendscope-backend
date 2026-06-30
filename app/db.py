@@ -105,15 +105,34 @@ SCHEMA_STATEMENTS = [
         id             BIGINT AUTO_INCREMENT PRIMARY KEY,
         ts             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         endpoint       VARCHAR(32) NOT NULL,
-        provider_used  VARCHAR(32) NULL,
+        provider_used  VARCHAR(48) NULL,
+        model_used     VARCHAR(64) NULL,
         is_fallback    TINYINT(1) NOT NULL DEFAULT 0,
         primary_error  VARCHAR(255) NULL,
         latency_ms     INT NULL,
         status         INT NULL,
+        user_hash      VARCHAR(64) NULL,
+        in_tokens      INT NULL,
+        out_tokens     INT NULL,
+        cost_usd       DECIMAL(12,6) NULL,
         INDEX idx_ts (ts),
-        INDEX idx_endpoint (endpoint)
+        INDEX idx_endpoint (endpoint),
+        INDEX idx_user (user_hash)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
+]
+
+# Idempotent column adds for already-deployed databases (the CREATE above only applies to a fresh
+# install). MySQL has no "ADD COLUMN IF NOT EXISTS", so each runs in its own transaction and a
+# duplicate-column error (1060) is swallowed — see init_schema.
+MIGRATION_STATEMENTS = [
+    "ALTER TABLE request_log ADD COLUMN model_used VARCHAR(64) NULL",
+    "ALTER TABLE request_log ADD COLUMN user_hash VARCHAR(64) NULL",
+    "ALTER TABLE request_log ADD COLUMN in_tokens INT NULL",
+    "ALTER TABLE request_log ADD COLUMN out_tokens INT NULL",
+    "ALTER TABLE request_log ADD COLUMN cost_usd DECIMAL(12,6) NULL",
+    "ALTER TABLE request_log ADD INDEX idx_user (user_hash)",
+    "ALTER TABLE request_log MODIFY COLUMN provider_used VARCHAR(48) NULL",
 ]
 
 
@@ -129,3 +148,12 @@ def init_schema() -> None:
         logger.info("DB schema ready")
     except Exception as exc:  # noqa: BLE001
         logger.warning("Schema init failed (ignored): %s", exc)
+
+    # Migrations for existing tables. Each in its own transaction so a duplicate-column/index error
+    # on an already-migrated DB doesn't abort the rest.
+    for stmt in MIGRATION_STATEMENTS:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(stmt))
+        except Exception:  # noqa: BLE001 — column/index already exists; expected on re-run
+            pass
