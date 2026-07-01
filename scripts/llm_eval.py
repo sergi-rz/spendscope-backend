@@ -98,12 +98,14 @@ def do_categorize(client, txns: list[dict], labels: list[str]) -> list[dict]:
     suggested: dict[str, str] = {}   # lowercased name -> display name
     for start in range(0, len(out), CATEGORIZE_BATCH):
         group = out[start:start + CATEGORIZE_BATCH]
+        # Wire contract is snake_case (the backend has no camelCase aliases) — matches what the app
+        # sends via its convert-to-snake-case encoder.
         items = [{"concept": t["concept"], "amount": t["amount"],
-                  "transactionType": t.get("transaction_type"), "notes": t.get("notes"),
-                  "sourceCategory": t.get("source_category")} for t in group]
+                  "transaction_type": t.get("transaction_type"), "notes": t.get("notes"),
+                  "source_category": t.get("source_category")} for t in group]
         res = post(client, "/categorize/batch", {
             "user_id": USER_ID, "items": items, "categories": labels,
-            "rejectedSuggestions": [], "alreadySuggested": list(suggested.values()),
+            "rejected_suggestions": [], "already_suggested": list(suggested.values()),
             "language": "es",
         })
         by_idx = {r["index"]: r for r in res.get("results", [])}
