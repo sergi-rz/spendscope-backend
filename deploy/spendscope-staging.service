@@ -1,0 +1,26 @@
+# systemd unit for the SpendScope STAGING backend (uvicorn).
+# A second, isolated instance so /enrich can be exercised with REQUIRE_PREMIUM=false WITHOUT
+# touching production. Separate checkout, separate .env, separate port (8078 vs prod 8077).
+#
+# Install: copy to /etc/systemd/system/spendscope-staging.service, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now spendscope-staging
+
+[Unit]
+Description=SpendScope Backend STAGING (FastAPI/uvicorn)
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/spendscope-staging
+EnvironmentFile=/opt/spendscope-staging/.env
+ExecStart=/opt/spendscope-staging/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8078 --workers 1
+Restart=always
+RestartSec=3
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
