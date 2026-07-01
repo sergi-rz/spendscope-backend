@@ -118,7 +118,8 @@ async def categorize_batch(req: CategorizeBatchRequest) -> CategorizeBatchRespon
         if misses:
             miss_items = [req.items[i] for i in misses]
             prompt = categorize_batch_user_prompt(
-                miss_items, req.categories, req.rejected_suggestions, req.language
+                miss_items, req.categories, req.rejected_suggestions, req.language,
+                req.already_suggested,
             )
             try:
                 result = await llm.complete_json(system=CATEGORIZE_BATCH_SYSTEM, user_text=prompt)

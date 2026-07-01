@@ -118,6 +118,11 @@ class CategorizeBatchRequest(BaseModel):
     items: list[CategorizeItem] = Field(default_factory=list)
     categories: list[str] = Field(default_factory=list)
     rejected_suggestions: list[str] = Field(default_factory=list)
+    # New-category names already proposed earlier in THIS import (#dedup): the app chunks a big import
+    # into several batch calls, and each call is stateless, so without this the model coins a fresh
+    # variant ("Supermercado" vs "Supermercados") per chunk. We feed the running list back so the model
+    # reuses an existing proposal verbatim when it fits, and the app collapses them by exact name.
+    already_suggested: list[str] = Field(default_factory=list)
     language: str = "en"
 
 

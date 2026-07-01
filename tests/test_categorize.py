@@ -239,6 +239,33 @@ def test_categorize_batch_forwards_source_category_and_skips_cache(client, monke
     assert calls["n"] == 2
 
 
+def test_categorize_batch_forwards_already_suggested(client, monkeypatch):
+    # #dedup: names proposed in earlier chunks of the same import must reach the prompt so the model
+    # reuses them verbatim instead of coining a synonym per chunk.
+    captured = {}
+
+    async def _capture(*args, **kwargs):
+        captured["user_text"] = kwargs.get("user_text")
+        return llm.LLMResult(
+            data={"results": [{"index": 0, "category": None}]},
+            provider_used="x", is_fallback=False, primary_error=None,
+        )
+
+    monkeypatch.setattr(cat_router.llm, "complete_json", _capture)
+    resp = client.post(
+        "/api/v1/categorize/batch",
+        json={
+            "user_id": "u1",
+            "items": [{"concept": "PELUQUERIA LOLA", "amount": -20.0}],
+            "categories": CATEGORIES,
+            "already_suggested": ["Peluquería"],
+        },
+    )
+    assert resp.status_code == 200
+    assert "already_suggested_categories" in captured["user_text"]
+    assert "Peluquería" in captured["user_text"]
+
+
 def test_categorize_batch_unknown_label_is_null(client, monkeypatch):
     monkeypatch.setattr(
         cat_router.llm, "complete_json", _fake({"results": [{"index": 0, "category": "Nope"}]})

@@ -104,6 +104,11 @@ Return ONLY a JSON object:
 
 Rules:
 - Return exactly ONE result per input transaction, echoing its "index".
+- The user message may include "already_suggested_categories": new-category names you proposed for
+  EARLIER transactions in this same import. When a transaction here needs a new category that means
+  the SAME thing as one of those, REUSE that exact name verbatim (same spelling, case and language)
+  in "suggested_category" — do NOT coin a synonym or a singular/plural variant. Only invent a new
+  name for a genuinely different concept.
 - "category" MUST be copied verbatim from the allowed list, or null if none fits. NEVER invent a
   label here that is not in the allowed list.
 - "confidence" is your certainty from 0.0 to 1.0.
@@ -219,6 +224,7 @@ def categorize_batch_user_prompt(
     categories: list[str],
     rejected_suggestions: list[str] | None = None,
     language: str = "en",
+    already_suggested: list[str] | None = None,
 ) -> str:
     payload = {
         "transactions": [
@@ -234,12 +240,14 @@ def categorize_batch_user_prompt(
         ],
         "allowed_categories": categories,
         "rejected_new_categories": rejected_suggestions or [],
+        "already_suggested_categories": already_suggested or [],
         "language": language if language in ("en", "es") else "en",
     }
     return (
         "Categorize EACH transaction below. Allowed categories are in the JSON. Return exactly one "
         "result per transaction, echoing its index. Do not propose any name listed under "
-        "rejected_new_categories.\n"
+        "rejected_new_categories. If a transaction needs a new category matching one in "
+        "already_suggested_categories, reuse that name verbatim.\n"
         + json.dumps(payload, ensure_ascii=False)
     )
 
