@@ -22,6 +22,21 @@ class ParseRequest(BaseModel):
     input_type: InputType
     content: str  # raw text, or base64 of a binary document/image
     filename: str | None = None
+    # Set by the app for a large import it gated via /parse/plan: route this chunk to the OpenAI fast
+    # lane (which sustains the app's parallel fire) instead of gemma. Small imports leave it false.
+    large_import: bool = False
+
+
+class ParsePlanRequest(BaseModel):
+    """The app asks, before a chunked import, whether it may use the OpenAI fast lane (#speed).
+    chunk_count is how many /parse calls the statement will split into."""
+    user_id: str
+    chunk_count: int
+
+
+class ParsePlanResponse(BaseModel):
+    lane: Literal["gemma", "openai"]  # "openai" = fire chunks in parallel with large_import=true
+    concurrency: int  # how many chunks the app may run at once (1 for the gemma lane)
 
 
 class ParsedTransaction(BaseModel):

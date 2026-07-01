@@ -120,6 +120,15 @@ SCHEMA_STATEMENTS = [
         INDEX idx_user (user_hash)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
+    """
+    CREATE TABLE IF NOT EXISTS parse_fast_grants (
+        id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+        user_hash  VARCHAR(64) NOT NULL,
+        ym         CHAR(6) NOT NULL,
+        ts         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_user_ym (user_hash, ym)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
 ]
 
 # Idempotent column adds for already-deployed databases (the CREATE above only applies to a fresh

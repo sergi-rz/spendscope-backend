@@ -9,8 +9,15 @@ import re
 from fastapi import APIRouter, HTTPException
 
 from ..config import settings
-from ..schemas import ParsedTransaction, ParseMetadata, ParseRequest, ParseResponse
-from ..services import llm, pricing
+from ..schemas import (
+    ParsedTransaction,
+    ParseMetadata,
+    ParsePlanRequest,
+    ParsePlanResponse,
+    ParseRequest,
+    ParseResponse,
+)
+from ..services import llm, oplog, pricing
 from ..services.preprocess import PreprocessError, prepare
 from ..services.prompts import PARSE_SYSTEM
 from .common import enforce_rate_limit, timed
@@ -41,12 +48,11 @@ async def parse(req: ParseRequest) -> ParseResponse:
             calls = [_run_parse("Parse this bank or card statement image into transactions.", payload)]
         else:
             chunks = _chunk_statement(payload)
-            # Big multi-chunk statements go straight to OpenAI: it benchmarked faster and far more
-            # reliable than gemma's tail latency on large parses (#bench, parse_large_route_chunks).
-            threshold = settings.parse_large_route_chunks
-            prefer_fallback = threshold > 0 and len(chunks) > threshold
+            # The app sends one chunk per call; for a large import it gated via /parse/plan it sets
+            # large_import=true so each chunk goes to the OpenAI fast lane (which sustains the app's
+            # parallel fire — gemma rate-limits concurrency). Small imports stay on sequential gemma.
             calls = [
-                _run_parse(f"Parse this statement into transactions:\n\n{chunk}", None, prefer_fallback)
+                _run_parse(f"Parse this statement into transactions:\n\n{chunk}", None, req.large_import)
                 for chunk in chunks
             ]
 
@@ -83,6 +89,31 @@ async def parse(req: ParseRequest) -> ParseResponse:
         metrics.primary_error = primary_error
         metrics.status = 200
         return ParseResponse(transactions=rows, metadata=ParseMetadata(bank_detected=None, count=len(rows)))
+
+
+@router.post("/parse/plan", response_model=ParsePlanResponse)
+async def parse_plan(req: ParsePlanRequest) -> ParsePlanResponse:
+    """Decide whether a chunked import may use the OpenAI fast lane. Authoritative for the cost
+    guardrails: it only grants the lane for statements in the size window AND within the user's
+    monthly quota, and records the grant so the quota actually counts (#speed)."""
+    enforce_rate_limit(req.user_id, "parse_plan")
+
+    n = req.chunk_count
+    gemma = ParsePlanResponse(lane="gemma", concurrency=1)
+
+    if settings.parse_fast_threshold_chunks <= 0:
+        return gemma
+    # Too small to bother (already fast + free on gemma) or too big (would cost too much on OpenAI —
+    # a huge upload stays on free gemma so one file can't run up the bill).
+    if n <= settings.parse_fast_threshold_chunks or n > settings.parse_fast_max_chunks:
+        return gemma
+
+    user_hash = oplog.anon_user(req.user_id)
+    if oplog.fast_lane_count_this_month(user_hash) >= settings.parse_fast_monthly_limit:
+        return gemma
+
+    oplog.record_fast_lane_grant(user_hash)
+    return ParsePlanResponse(lane="openai", concurrency=settings.parse_fast_concurrency)
 
 
 async def _run_parse(

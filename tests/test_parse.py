@@ -155,3 +155,67 @@ def test_parse_survives_one_failed_chunk(client, monkeypatch):
         json={"user_id": "u1", "input_type": "text", "content": rows, "filename": "x.csv"},
     )
     assert resp.status_code == 200  # other batches still import
+
+
+# --- /parse/plan fast-lane gate (#speed cost guardrails) -----------------------
+
+def _plan(client, chunk_count):
+    return client.post("/api/v1/parse/plan", json={"user_id": "u1", "chunk_count": chunk_count})
+
+
+def test_plan_grants_openai_for_a_large_import(client, monkeypatch):
+    monkeypatch.setattr(parse_router.oplog, "fast_lane_count_this_month", lambda *_: 0)
+    granted = {"n": 0}
+    monkeypatch.setattr(parse_router.oplog, "record_fast_lane_grant",
+                        lambda *_: granted.__setitem__("n", granted["n"] + 1))
+    r = _plan(client, 10)  # >4 and <=50
+    assert r.status_code == 200
+    body = r.json()
+    assert body["lane"] == "openai" and body["concurrency"] == 8
+    assert granted["n"] == 1  # the grant was recorded (counts against the monthly quota)
+
+
+def test_plan_small_import_stays_on_gemma(client, monkeypatch):
+    granted = {"n": 0}
+    monkeypatch.setattr(parse_router.oplog, "fast_lane_count_this_month", lambda *_: 0)
+    monkeypatch.setattr(parse_router.oplog, "record_fast_lane_grant",
+                        lambda *_: granted.__setitem__("n", granted["n"] + 1))
+    r = _plan(client, 3)  # <= threshold
+    assert r.json()["lane"] == "gemma"
+    assert granted["n"] == 0  # no grant, no quota consumed
+
+
+def test_plan_huge_import_stays_on_gemma(client, monkeypatch):
+    monkeypatch.setattr(parse_router.oplog, "fast_lane_count_this_month", lambda *_: 0)
+    monkeypatch.setattr(parse_router.oplog, "record_fast_lane_grant", lambda *_: None)
+    r = _plan(client, 51)  # > max_chunks: too big, protect the bill
+    assert r.json()["lane"] == "gemma"
+
+
+def test_plan_denies_over_monthly_limit(client, monkeypatch):
+    monkeypatch.setattr(parse_router.oplog, "fast_lane_count_this_month", lambda *_: 15)  # at the cap
+    granted = {"n": 0}
+    monkeypatch.setattr(parse_router.oplog, "record_fast_lane_grant",
+                        lambda *_: granted.__setitem__("n", granted["n"] + 1))
+    r = _plan(client, 10)
+    assert r.json()["lane"] == "gemma"
+    assert granted["n"] == 0
+
+
+def test_parse_large_import_flag_routes_to_fallback(client, monkeypatch):
+    seen = {}
+
+    async def _capture(*args, **kwargs):
+        seen["prefer_fallback"] = kwargs.get("prefer_fallback")
+        return llm.LLMResult(
+            data={"transactions": [{"date": "2026-05-01", "concept": "OK", "amount": -1.0}]},
+            provider_used="openai", is_fallback=True, primary_error=None,
+        )
+
+    monkeypatch.setattr(parse_router.llm, "complete_json", _capture)
+    resp = client.post("/api/v1/parse", json={
+        "user_id": "u1", "input_type": "text", "content": "2026-05-01\tX\t-1.00",
+        "filename": "x.csv", "large_import": True,
+    })
+    assert resp.status_code == 200
+    assert seen["prefer_fallback"] is True
