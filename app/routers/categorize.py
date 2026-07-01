@@ -105,6 +105,15 @@ async def categorize_batch(req: CategorizeBatchRequest) -> CategorizeBatchRespon
         misses: list[int] = []
 
         for i, item in enumerate(req.items):
+            # #66: if the file's own category IS one of our categories (exact, case-insensitive),
+            # adopt it verbatim and skip the LLM. The model otherwise sometimes returns null for an
+            # opaque concept even when source_category is a perfect match (e.g. "Vacaciones",
+            # "Ahorros" from a bank export whose concept is just "Transferencia realizada").
+            if item.source_category:
+                canon = allowed.get(item.source_category.strip().lower())
+                if canon:
+                    results[i] = CategorizeResult(index=i, category=canon, confidence=1.0)
+                    continue
             # Items carrying a source_category (an import from another app, #66) bypass the
             # concept cache: their mapping depends on that hint, not just the concept.
             cached = None if item.source_category else cache.get(item.concept, item.amount)

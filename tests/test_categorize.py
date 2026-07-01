@@ -239,6 +239,26 @@ def test_categorize_batch_forwards_source_category_and_skips_cache(client, monke
     assert calls["n"] == 2
 
 
+def test_categorize_batch_adopts_exact_source_category(client, monkeypatch):
+    # #66: a source_category that exactly matches an allowed label is adopted WITHOUT calling the LLM
+    # (it used to sometimes return null on opaque concepts, ignoring a perfect hint).
+    async def _boom(*a, **k):
+        raise AssertionError("LLM must not be called when source_category exactly matches a label")
+
+    monkeypatch.setattr(cat_router.llm, "complete_json", _boom)
+    resp = client.post("/api/v1/categorize/batch", json={
+        "user_id": "u1",
+        "items": [
+            {"concept": "TRANSFERENCIA REALIZADA", "amount": -200.0, "source_category": "aLiMeNtAcIón / Supermercado"},
+        ],
+        "categories": CATEGORIES,
+    })
+    assert resp.status_code == 200
+    r = resp.json()["results"][0]
+    assert r["category"] == "Alimentación / Supermercado"  # canonical casing, verbatim from our list
+    assert r["confidence"] == 1.0
+
+
 def test_categorize_batch_forwards_already_suggested(client, monkeypatch):
     # #dedup: names proposed in earlier chunks of the same import must reach the prompt so the model
     # reuses them verbatim instead of coining a synonym per chunk.
