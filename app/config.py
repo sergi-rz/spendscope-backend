@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     parse_fast_monthly_limit: int = 15
     # Concurrency the app uses when firing a fast-lane import's chunks at OpenAI.
     parse_fast_concurrency: int = 8
+    # HMAC secret for signing fast-lane grants (#speed P0). Empty → derived from the DB URL (stable
+    # across workers). Set explicitly in prod if you want to rotate independently of the DB password.
+    parse_fast_secret: str = ""
     # When true, log the model's raw output (truncated) on a parse failure, to debug LLMBadOutput.
     # Off by default: the raw output is user financial data and we don't want it in logs normally.
     llm_debug_raw: bool = False

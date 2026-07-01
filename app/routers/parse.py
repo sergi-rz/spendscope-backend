@@ -17,7 +17,7 @@ from ..schemas import (
     ParseRequest,
     ParseResponse,
 )
-from ..services import llm, oplog, pricing
+from ..services import grant, llm, oplog, pricing
 from ..services.preprocess import PreprocessError, prepare
 from ..services.prompts import PARSE_SYSTEM
 from .common import enforce_rate_limit, timed
@@ -48,11 +48,11 @@ async def parse(req: ParseRequest) -> ParseResponse:
             calls = [_run_parse("Parse this bank or card statement image into transactions.", payload)]
         else:
             chunks = _chunk_statement(payload)
-            # The app sends one chunk per call; for a large import it gated via /parse/plan it sets
-            # large_import=true so each chunk goes to the OpenAI fast lane (which sustains the app's
-            # parallel fire — gemma rate-limits concurrency). Small imports stay on sequential gemma.
+            # Fast lane (OpenAI) ONLY with a valid grant minted by /parse/plan for this user — a bare
+            # flag can't buy the paid lane (#speed P0). Without a grant, stay on free sequential gemma.
+            fast = grant.verify(req.grant, oplog.anon_user(req.user_id))
             calls = [
-                _run_parse(f"Parse this statement into transactions:\n\n{chunk}", None, req.large_import)
+                _run_parse(f"Parse this statement into transactions:\n\n{chunk}", None, fast)
                 for chunk in chunks
             ]
 
@@ -109,11 +109,15 @@ async def parse_plan(req: ParsePlanRequest) -> ParsePlanResponse:
         return gemma
 
     user_hash = oplog.anon_user(req.user_id)
-    if oplog.fast_lane_count_this_month(user_hash) >= settings.parse_fast_monthly_limit:
+    if user_hash is None or oplog.fast_lane_count_this_month(user_hash) >= settings.parse_fast_monthly_limit:
         return gemma
 
     oplog.record_fast_lane_grant(user_hash)
-    return ParsePlanResponse(lane="openai", concurrency=settings.parse_fast_concurrency)
+    return ParsePlanResponse(
+        lane="openai",
+        concurrency=settings.parse_fast_concurrency,
+        grant=grant.mint(user_hash),
+    )
 
 
 async def _run_parse(

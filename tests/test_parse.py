@@ -172,6 +172,7 @@ def test_plan_grants_openai_for_a_large_import(client, monkeypatch):
     assert r.status_code == 200
     body = r.json()
     assert body["lane"] == "openai" and body["concurrency"] == 8
+    assert body.get("grant")  # signed token the app must attach to each /parse call
     assert granted["n"] == 1  # the grant was recorded (counts against the monthly quota)
 
 
@@ -202,7 +203,11 @@ def test_plan_denies_over_monthly_limit(client, monkeypatch):
     assert granted["n"] == 0
 
 
-def test_parse_large_import_flag_routes_to_fallback(client, monkeypatch):
+def test_parse_fast_lane_requires_valid_grant(client, monkeypatch):
+    # #speed P0: the OpenAI fast lane is taken ONLY with a valid grant for this user — a client can't
+    # buy the paid lane on its own (the old large_import boolean was forgeable).
+    from app.services import grant, oplog
+
     seen = {}
 
     async def _capture(*args, **kwargs):
@@ -213,9 +218,31 @@ def test_parse_large_import_flag_routes_to_fallback(client, monkeypatch):
         )
 
     monkeypatch.setattr(parse_router.llm, "complete_json", _capture)
-    resp = client.post("/api/v1/parse", json={
-        "user_id": "u1", "input_type": "text", "content": "2026-05-01\tX\t-1.00",
-        "filename": "x.csv", "large_import": True,
-    })
-    assert resp.status_code == 200
+    body = {"user_id": "u1", "input_type": "text", "content": "2026-05-01\tX\t-1.00", "filename": "x.csv"}
+
+    # Valid grant → fast lane.
+    good = grant.mint(oplog.anon_user("u1"))
+    assert client.post("/api/v1/parse", json={**body, "grant": good}).status_code == 200
     assert seen["prefer_fallback"] is True
+
+    # No grant → stays on free gemma (bypass closed).
+    client.post("/api/v1/parse", json=body)
+    assert seen["prefer_fallback"] is False
+
+    # A grant minted for a DIFFERENT user → rejected.
+    other = grant.mint(oplog.anon_user("someone-else"))
+    client.post("/api/v1/parse", json={**body, "grant": other})
+    assert seen["prefer_fallback"] is False
+
+    # A forged/garbage grant → rejected.
+    client.post("/api/v1/parse", json={**body, "grant": "deadbeef.9999999999.forged"})
+    assert seen["prefer_fallback"] is False
+
+
+def test_grant_sign_and_expiry():
+    from app.services import grant
+    tok = grant.mint("abc123", ttl_seconds=60)
+    assert grant.verify(tok, "abc123") is True
+    assert grant.verify(tok, "other") is False           # bound to the user
+    assert grant.verify(grant.mint("abc123", ttl_seconds=-1), "abc123") is False  # expired
+    assert grant.verify(tok[:-1] + ("0" if tok[-1] != "0" else "1"), "abc123") is False  # tampered sig
